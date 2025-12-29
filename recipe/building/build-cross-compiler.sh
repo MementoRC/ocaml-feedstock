@@ -6,6 +6,12 @@ if [[ "${target_platform}" == "linux-64" ]] || [[ "${target_platform}" == "osx-6
   # Set OCAMLLIB to installed native ocaml
   export OCAMLLIB="${PREFIX}/lib/ocaml"
 
+  # CRITICAL: Save native CONDA_OCAML_* values BEFORE the loop
+  # These are needed for building native tools (ocamlc.opt, ocamlopt.opt, profiling.cmx)
+  # that run on the BUILD machine. Must save before ANY loop iteration sets them to cross values.
+  _ORIGINAL_NATIVE_AS="${CONDA_OCAML_AS:-${BUILD_PREFIX}/bin/as}"
+  _ORIGINAL_NATIVE_CC="${CONDA_OCAML_CC:-${CC}}"
+
   # Define cross targets based on build platform
   declare -A CROSS_TARGETS
   if [[ "${target_platform}" == "linux-64" ]]; then
@@ -135,6 +141,12 @@ if [[ "${target_platform}" == "linux-64" ]] || [[ "${target_platform}" == "osx-6
     # from parent (native) build which has LIBDIR=${PREFIX}/lib/ocaml
     echo "     crossopt"
 
+    # Use the pre-saved native values from BEFORE the loop
+    # These are needed for building native tools (ocamlc.opt, ocamlopt.opt, profiling.cmx)
+    # that run on the BUILD machine
+    _NATIVE_AS="${_ORIGINAL_NATIVE_AS}"
+    _NATIVE_CC="${_ORIGINAL_NATIVE_CC}"
+
     # Common crossopt args
     _CROSSOPT_ARGS=(
       ARCH="${_ARCH}"
@@ -156,11 +168,15 @@ if [[ "${target_platform}" == "linux-64" ]] || [[ "${target_platform}" == "osx-6
       SAK_CFLAGS="${CFLAGS}"
       STRIP="${_STRIP}"
       ZSTD_LIBS="-L${BUILD_PREFIX}/lib -lzstd"
+      NATIVE_AS="${_NATIVE_AS}"
+      NATIVE_CC="${_NATIVE_CC}"
     )
 
     # Platform-specific args
     if [[ "${_PLATFORM}" == "macos" ]]; then
+      # macOS: SAK tools must use LLVM (GNU ar format incompatible with ld64)
       _CROSSOPT_ARGS+=(SAK_LDFLAGS="-fuse-ld=lld")
+      _CROSSOPT_ARGS+=(SAK_AR="${BUILD_PREFIX}/bin/llvm-ar")
     fi
 
     make crossopt "${_CROSSOPT_ARGS[@]}" -j${CPU_COUNT} > "${SRC_DIR}"/_logs/crossopt.log 2>&1 || { cat "${SRC_DIR}"/_logs/crossopt.log; exit 1; }

@@ -1,8 +1,8 @@
-@if defined _OOCAML_OCAMLLIB_BACKUP (
-    @set "OCAML_OCAMLLIB=%_OCAML_OCAMLLIB_BACKUP%"
+@if defined _OCAML_OCAMLLIB_BACKUP (
+    @set "OCAMLLIB=%_OCAML_OCAMLLIB_BACKUP%"
     @set "_OCAML_OCAMLLIB_BACKUP="
 ) else (
-    @set "OCAML_OCAMLLIB="
+    @set "OCAMLLIB="
 )
 
 @if defined _OCAML_PREFIX_BACKUP (
@@ -11,3 +11,11 @@
 ) else (
     @set "OCAML_PREFIX="
 )
+
+@REM Clean up CONDA_OCAML_* toolchain variables
+@set "CONDA_OCAML_AS="
+@set "CONDA_OCAML_CC="
+@set "CONDA_OCAML_AR="
+@set "CONDA_OCAML_RANLIB="
+@set "CONDA_OCAML_MKEXE="
+@set "CONDA_OCAML_MKDLL="
