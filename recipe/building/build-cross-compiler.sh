@@ -10,6 +10,19 @@
 # Source common functions
 source "${RECIPE_DIR}/building/common-functions.sh"
 
+# ============================================================================
+# Early CFLAGS/LDFLAGS Sanitization
+# ============================================================================
+# conda-build can produce CFLAGS with mixed-arch flags even in native builds:
+#   -march=nocona -mtune=haswell (x86) ... duplicated flags ...
+# When building cross-compilers, we pass these flags to the cross-compiler
+# which fails on x86-specific flags.
+# ALWAYS sanitize CFLAGS when building cross-compilers, regardless of
+# CONDA_BUILD_CROSS_COMPILATION setting.
+# Remove x86-specific flags since cross-compilers target ARM/PPC
+# Use "aarch64" as default - the sanitization removes x86 flags for any non-x86 target
+sanitize_and_export_cross_flags "aarch64"
+
 if [[ "${target_platform}" != "linux"* ]] && [[ "${target_platform}" != "osx"* ]]; then
   echo "No cross-compiler recipe for ${target_platform} ... yet"
   return 0
@@ -102,6 +115,13 @@ for target in "${CROSS_TARGETS[@]}"; do
   # Setup cross-toolchain (sets CROSS_CC, CROSS_AS, CROSS_AR, etc.)
   setup_toolchain "CROSS" "${target}"
   setup_cflags_ldflags "CROSS" "${build_platform}" "${CROSS_PLATFORM}"
+
+  # CRITICAL: Also export CFLAGS/LDFLAGS to environment with clean values
+  # Make inherits environment variables, and CROSS_OVERRIDES in Makefile.cross
+  # uses $(CFLAGS) which could pick up polluted environment values.
+  # By exporting CROSS_CFLAGS as CFLAGS, we ensure consistency.
+  export CFLAGS="${CROSS_CFLAGS}"
+  export LDFLAGS="${CROSS_LDFLAGS}"
 
   # Export CONDA_OCAML_<TARGET_ID>_* variables
   TARGET_ID=$(get_target_id "${target}")
