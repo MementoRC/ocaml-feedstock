@@ -50,6 +50,12 @@ recipe:
 source:
   - url: https://github.com/ocaml/ocaml/archive/refs/tags/${{ version }}.tar.gz
     sha256: 4ab55ac30d247e20f35df20a9f7596e5eb5f92fbbd0f8e3e54838bbc3edf931e
+    patches:
+      # Fix header include order bug where atomic_load_acquire/atomic_store_release
+      # macros are undefined when mlvalues.h is included before platform.h.
+      # The macros were guarded by CAML_INTERNALS, but public headers include
+      # camlatomic.h, setting the include guard before CAML_INTERNALS is defined.
+      - patches/fix-camlatomic-include-order.patch
   - if: win
     then:
       url: https://github.com/ocaml/flexdll/archive/refs/tags/${{ flexdll_version }}.tar.gz
@@ -531,6 +537,48 @@ outputs:
         requirements:
           run:
             - ${{ m2 }}grep
+
+  # ==========================================================================
+  # DEVELOPMENT META-PACKAGE: ocaml-devel (COMMENTED OUT)
+  # Full OCaml development environment with build tools
+  # Uncomment when opam, dune, ocamlfind, ocamlbuild are available on conda-forge
+  # ==========================================================================
+  # - package:
+  #     name: ocaml-devel
+  #   build:
+  #     skip: TG_ != target_platform
+  #     script: echo "Development environment meta-package"
+  #   requirements:
+  #     run:
+  #       - ${{ pin_subpackage('ocaml-compiler', exact=True) }}
+  #       # Package manager
+  #       - opam
+  #       # Build systems
+  #       - dune
+  #       - ocamlbuild
+  #       # Package finder/installer
+  #       - ocamlfind
+  #   tests:
+  #     # ----------------------------------------------------------------------
+  #     # Verify all development tools are available
+  #     # ----------------------------------------------------------------------
+  #     - script: |
+  #         ocaml -version
+  #         ocamlopt${{ xt }} -version
+  #         opam --version
+  #         dune --version
+  #         ocamlfind -version
+  #         ocamlbuild -version
+  #         echo "ocaml-devel environment ready"
+  #
+  #     # ----------------------------------------------------------------------
+  #     # Test dune project build
+  #     # ----------------------------------------------------------------------
+  #     - script:
+  #         - cd testing && ${{ dot }}test-dune-project.${{ sh }}
+  #       files:
+  #         recipe:
+  #           - testing/test-dune-project.${{ sh }}
 
 about:
   homepage: https://ocaml.org/
