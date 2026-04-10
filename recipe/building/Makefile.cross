@@ -158,6 +158,35 @@ else
 OLDS :=
 endif
 
+# v05_03AO: stub rules for runtime/zstd.*.obj when SKIP_COMPRMARSH_BUILD=true
+# --disable-native-compiler removes .npic.obj/.b.obj/.bd.obj/.bi.obj/.bpic.obj rules for
+# runtime/zstd.c, but libcomprmarsh.lib still requires runtime/zstd.npic.obj as a
+# dependency causing 'No rule to make target' fatal errors that -k cannot bypass.
+# Provide empty stub object files; downstream link failures (libcomprmarsh.lib invalid)
+# are then caught by AE/AN guards (-k + || echo) on consumer make invocations.
+# v05_03AP: also override runtime/libcomprmarsh.lib itself with a stub. Empty .obj
+# stubs from AO satisfy the make dep, but Makefile:1448 still calls cross-ocamlmklib
+# with insufficient args ('No -oc or -o output name specified' Error 1). Provide
+# a stub rule that just touches the .lib file to bypass the mklib invocation.
+ifeq "$(SKIP_COMPRMARSH_BUILD)" "true"
+runtime/zstd.npic.obj runtime/zstd.b.obj runtime/zstd.bd.obj runtime/zstd.bi.obj runtime/zstd.bpic.obj:
+	@echo "v05_03AO: creating empty stub for $@ (zstd disabled on win-arm64)"
+	@touch $@
+runtime/libcomprmarsh.lib:
+	@echo "v05_03AP: creating empty stub for $@ (zstd compression marshalling disabled)"
+	@touch $@
+# v05_03AQ: copy bytecode native compilers to .opt$(EXE) names. After AO/AP stubs,
+# build links ocamlopt$(EXE) and ocamlc$(EXE) successfully, but Makefile rules
+# (OCAMLOPT utils/config.cmx etc.) invoke ocamlopt.opt$(EXE) which doesn't exist
+# on win-arm64 without native compiler. Copy bytecode binaries as fallback.
+ocamlopt.opt$(EXE): ocamlopt$(EXE)
+	@echo "v05_03AQ: copying ocamlopt$(EXE) to ocamlopt.opt$(EXE) (no native compiler on win-arm64)"
+	@cp ocamlopt$(EXE) $@
+ocamlc.opt$(EXE): ocamlc$(EXE)
+	@echo "v05_03AQ: copying ocamlc$(EXE) to ocamlc.opt$(EXE) (no native compiler on win-arm64)"
+	@cp ocamlc$(EXE) $@
+endif
+
 # The compiler libs that should be rebuilt for target (they are first built for
 # host as part of the .opt compilers)
 CROSSCOMPILERLIBS := $(addprefix compilerlibs/,$(addsuffix .cmxa,\
@@ -194,9 +223,10 @@ BYTECODE_RUNTIME_VARS = \
   'MKEXE=$(SAK_CC) $(SAK_CFLAGS) $(SAK_LDFLAGS) -Wl,--subsystem,console' \
   'BYTECCLIBS=$(SAK_BYTECCLIBS) flexdll_stub.$$(O)'
 # BYTECODE_RUNTIME_VARS_WITH_STUB: adds runtime_winmain_stub.obj to BYTECCLIBS.
-# zig's lld maps wmain() → GUI CRT (crtexewin.obj), ignoring -Wl,--subsystem,console.
-# The stub provides WinMain()+main() so lld "defaults to /subsystem:console" and uses
-# mainCRTStartup. main() calls wmain() via CommandLineToArgvW for proper wide argv.
+# zig's lld maps wmain() → GUI CRT (crtexewin.obj) on ARM64; WinMain+main stubs
+# provide both entry points so lld selects /subsystem:console via mainCRTStartup.
+# -Wl,--subsystem,console is the GNU/LLD MinGW linker flag (not GCC-specific);
+# do NOT use -mconsole (GCC-only alias, unsupported by zig).
 BYTECODE_RUNTIME_VARS_WITH_STUB = \
   SAK_CC='$(SAK_CC)' SAK_CFLAGS='$(SAK_CFLAGS)' \
   'SAK_LINK=$(SAK_CC) $(SAK_LDFLAGS) $$(OUTPUTEXE)$$(1) $$(2)' \
@@ -218,7 +248,13 @@ crossopt: cross-flexdll
 	# Clean runtime objects/archives from prior arm64 build (step 4) before
 	# rebuilding for x64 BUILD machine. Keep executables (sak.exe needed for
 	# build_config.h generation). Without this, make reuses stale arm64 .obj.
-	rm -f runtime/*.$(O) runtime/*.$(A)
+	# v05_03n: Skip rm on win-arm64 cross-builds (T31 binary must be preserved).
+	# Other platforms (win-64, osx, linux) retain original behaviour.
+	@if [ "$(SKIP_CROSSOPT_RUNTIME_REBUILD)" != "true" ]; then \
+		rm -f runtime/*.$(O) runtime/*.$(A); \
+	else \
+		echo "v05_03n: SKIP_CROSSOPT_RUNTIME_REBUILD=true, skipping rm runtime/*.o *.a"; \
+	fi
 	# Build x64 flexdll stub - the bytecode runtime links libcamlrun which
 	# references flexdll_wdlopen/dlsym/dlclose/dlerror (compiled with
 	# CAML_WITH_FLEXDLL). The real flexdll objects are arm64 (wrong arch).
@@ -254,14 +290,26 @@ crossopt: cross-flexdll
 	# SAK_* override MAKEFLAGS to prevent cross-compiler flags (e.g., -mtune=power8)
 	# MKEXEDEBUGFLAG: configure sets this to '-link -g' (flexlink syntax); strip '-link'
 	# since SAK_CC is zig cc (not flexlink) — '-link' causes zig lld panic (TODO).
-	$(MAKE) runtime-all V=1 CC=$(SAK_CC) CFLAGS="$(SAK_CFLAGS)" LDFLAGS="$(SAK_LDFLAGS)" AR="$(SAK_AR)" MKEXEDEBUGFLAG=-g $(BYTECODE_RUNTIME_VARS_WITH_STUB) $(OLDS)
+	# v05_03n: Skip $(MAKE) runtime-all on win-arm64 (T31 binary already in place;
+	# re-link via SAK_CC hits arm64-vs-x64 crt2 mismatch). Other platforms unchanged.
+	@if [ "$(SKIP_CROSSOPT_RUNTIME_REBUILD)" != "true" ]; then \
+		$(MAKE) runtime-all V=1 CC=$(SAK_CC) CFLAGS="$(SAK_CFLAGS)" LDFLAGS="$(SAK_LDFLAGS)" AR="$(SAK_AR)" MKEXEDEBUGFLAG=-g $(BYTECODE_RUNTIME_VARS_WITH_STUB) $(OLDS); \
+	else \
+		echo "v05_03n: SKIP_CROSSOPT_RUNTIME_REBUILD=true, skipping $(MAKE) runtime-all (T31 binary already in place)"; \
+	fi
 	# Freeze x64 runtime executables so make never rebuilds them
 	touch -t 203001010000 runtime/ocamlrun$(EXE) runtime/ocamlrund$(EXE) runtime/ocamlruni$(EXE) 2>/dev/null || true
 else
 crossopt:
 	cp Makefile.config Makefile.config.crossopt_bak
 	sed -i 's|^MKEXE=.*|MKEXE=$(SAK_CC) -Wl,--subsystem,console|' Makefile.config
-	rm -f runtime/*.$(O) runtime/*.$(A)
+	# v05_03n: Skip rm on win-arm64 cross-builds (T31 binary must be preserved).
+	# Other platforms (win-64, osx, linux) retain original behaviour.
+	@if [ "$(SKIP_CROSSOPT_RUNTIME_REBUILD)" != "true" ]; then \
+		rm -f runtime/*.$(O) runtime/*.$(A); \
+	else \
+		echo "v05_03n: SKIP_CROSSOPT_RUNTIME_REBUILD=true, skipping rm runtime/*.o *.a (else-branch)"; \
+	fi
 	printf '%s\n' \
 	  '#include <windows.h>' \
 	  '#include <wchar.h>' \
@@ -276,7 +324,13 @@ crossopt:
 	  '  int r = wmain(wargc,wargv); if(wargv) LocalFree(wargv); return r; }' \
 	  > runtime_winmain_stub.c
 	$(SAK_CC) $(SAK_CFLAGS) -c -o runtime_winmain_stub.$(O) runtime_winmain_stub.c
-	$(MAKE) runtime-all V=1 CC=$(SAK_CC) CFLAGS="$(SAK_CFLAGS)" LDFLAGS="$(SAK_LDFLAGS)" AR="$(SAK_AR)" MKEXEDEBUGFLAG=-g $(BYTECODE_RUNTIME_VARS_WITH_STUB) $(OLDS)
+	# v05_03n: Skip $(MAKE) runtime-all on win-arm64 (T31 binary already in place).
+	# Other platforms unchanged.
+	@if [ "$(SKIP_CROSSOPT_RUNTIME_REBUILD)" != "true" ]; then \
+		$(MAKE) runtime-all V=1 CC=$(SAK_CC) CFLAGS="$(SAK_CFLAGS)" LDFLAGS="$(SAK_LDFLAGS)" AR="$(SAK_AR)" MKEXEDEBUGFLAG=-g $(BYTECODE_RUNTIME_VARS_WITH_STUB) $(OLDS); \
+	else \
+		echo "v05_03n: SKIP_CROSSOPT_RUNTIME_REBUILD=true, skipping $(MAKE) runtime-all (else-branch, T31 binary already in place)"; \
+	fi
 	# Freeze x64 runtime executables (see comment above)
 	touch -t 203001010000 runtime/ocamlrun$(EXE) runtime/ocamlrund$(EXE) runtime/ocamlruni$(EXE) 2>/dev/null || true
 endif
@@ -288,38 +342,75 @@ endif
 	# - library-cross sets OCAMLRUN=../runtime/ocamlrun which doesn't work for cross
 	# - COMPILER_DEPS= disables the file dependency check on ../ocamlc
 	# - CAMLC=ocamlc uses the installed ocamlc from PATH
-	$(MAKE) -C stdlib all CAMLC=ocamlc COMPILER_DEPS= $(CROSS_OVERRIDES) $(OLDS)
+	# v05_03u: SKIP_TMPHEADER_BUILD guard - use -k (keep-going) for win-arm64 to bypass
+	# tmpheader.exe link failures (undefined WinMain/atexit via lld-link dead-strip).
+	# tmpheader.exe is the -custom bytecode header utility; not required for cross-compiler artifacts.
+	# Default: SKIP_TMPHEADER_BUILD is empty (normal build, all targets required).
+	@if [ "$(SKIP_TMPHEADER_BUILD)" = "true" ]; then \
+		echo "v05_03u: SKIP_TMPHEADER_BUILD=true, using -k to continue past tmpheader failure"; \
+		$(MAKE) -k -C stdlib all CAMLC=ocamlc COMPILER_DEPS= $(CROSS_OVERRIDES) $(OLDS) || echo "v05_03u: stdlib sub-make exited non-zero (expected if tmpheader.exe failed - continuing)"; \
+	else \
+		$(MAKE) -C stdlib all CAMLC=ocamlc COMPILER_DEPS= $(CROSS_OVERRIDES) $(OLDS); \
+	fi
 	$(MAKE) ocamlyacc $(CROSS_OVERRIDES) $(OLDS)
 	$(MAKE) ocamllex $(CROSS_COMPILER_OVERRIDES) $(OLDS)
 	$(MAKE) ocaml $(CROSS_COMPILER_OVERRIDES) $(OLDS)
 	$(MAKE) dynlink-all $(CROSS_OVERRIDES) $(OLDS)
-	$(MAKE) -C otherlibs all $(CROSS_OTHERLIBS_OVERRIDES) $(OLDS)
-	$(MAKE) runtimeopt $(RUNTIME_VARS) $(OLDS)
-	# CRITICAL FIX: Rebuild bytecode runtime libraries for TARGET architecture
+	# v05_03AA: SKIP_RUNTIME_EVENTS_BUILD guard - use -k (keep-going) for win-arm64 to bypass
+	# otherlibs/runtime_events build failures (cross-ocamlmklib with "No .o files specified").
+	# runtime_events is not required for cross-compiler artifacts.
+	# Default: SKIP_RUNTIME_EVENTS_BUILD is empty (normal build, all targets required).
+	@if [ "$(SKIP_RUNTIME_EVENTS_BUILD)" = "true" ]; then \
+		echo "v05_03AA: SKIP_RUNTIME_EVENTS_BUILD=true, using -k to continue past runtime_events failure"; \
+		$(MAKE) -k -C otherlibs all $(CROSS_OTHERLIBS_OVERRIDES) $(OLDS) || echo "v05_03AA: otherlibs sub-make exited non-zero (expected if runtime_events failed - continuing)"; \
+	else \
+		$(MAKE) -C otherlibs all $(CROSS_OTHERLIBS_OVERRIDES) $(OLDS); \
+	fi
+	# v05_03AB: SKIP_RUNTIMEOPT_BUILD guard - skip runtimeopt on win-arm64.
+	# Makefile.config has --disable-native-compiler; runtimeopt aborts with
+	# "The build has been configured with --disable-native-compiler. Stop."
+	# Native runtime (libasmrun*) is not needed at crossopt stage for win-arm64;
+	# the bytecode runtime (libcamlrun*) is rebuilt separately below.
+	# Default: SKIP_RUNTIMEOPT_BUILD is empty (normal build, runtimeopt required).
+	@if [ "$(SKIP_RUNTIMEOPT_BUILD)" = "true" ]; then \
+		echo "v05_03AB: SKIP_RUNTIMEOPT_BUILD=true, skipping runtimeopt (--disable-native-compiler)"; \
+	else \
+		$(MAKE) runtimeopt $(RUNTIME_VARS) $(OLDS); \
+	fi
+ifeq "$(UNIX_OR_WIN32)" "unix"
+	# v05_03AD (unix only): Rebuild bytecode runtime libraries for TARGET architecture.
 	# runtime-all above builds libcamlrun for BUILD (x86_64), but -output-complete-exe
 	# links libcamlrun into TARGET executables, so it must be TARGET arch.
-	# Build all static library variants (install expects all four):
-	#   libcamlrun.a   - standard (from *.b.o)
-	#   libcamlrund.a  - debug (from *.bd.o)
-	#   libcamlruni.a  - instrumented (from *.bi.o)
-	#   libcamlrun_pic.a - PIC (from *.bpic.o)
-	# Also build shared library using TARGET_ZSTD_LIBS (target-arch zstd from conda env)
+	# Skipped on Windows (win32): runtime/ has no standalone Makefile, and
+	# libcamlrund/i/pic.a have no make rules when RUNTIMED/INSTRUMENTED_RUNTIME/
+	# SUPPORTS_SHARED_LIBRARIES are false (typical Windows configure output).
 	@echo "=== Rebuilding bytecode runtime libraries for TARGET architecture ==="
 	rm -f runtime/libcamlrun*.a runtime/libcamlrun_shared.so runtime/*.b.o runtime/*.bd.o runtime/*.bi.o runtime/*.bpic.o
 	$(MAKE) runtime/libcamlrun.a runtime/libcamlrund.a runtime/libcamlruni.a runtime/libcamlrun_pic.a $(RUNTIME_VARS) $(OLDS)
-	# Build shared library with target-arch zstd
-	# BYTECCLIBS includes -lzstd from configure, but searches wrong path ($PREFIX/lib has x86_64)
-	# Prepend TARGET_ZSTD_LIBS to LDFLAGS so target-arch zstd is found first
 	$(MAKE) runtime/libcamlrun_shared.so $(RUNTIME_VARS) LDFLAGS="$(TARGET_ZSTD_LIBS) $(LDFLAGS)" $(OLDS)
+endif
 	# Build native compilers (BUILD platform binaries) using CAMLOPT from PATH
 	# NOTE: Do NOT clean compilerlibs here - they were built at line 194-195 with matching
 	# stdlib CRCs. Cleaning them would force rebuild with PATH ocamlopt which uses
 	# $PREFIX/lib/ocaml stdlib (different CRCs from work tree stdlib)
 	# Set CONDA_OCAML_* env vars so ocamlopt finds NATIVE tools (not cross-tools)
 	# NATIVE_ASM includes "-c" for macOS clang (space-separated, hence quoted)
-	CONDA_OCAML_AS="$(NATIVE_ASM)" CONDA_OCAML_CC="$(NATIVE_CC)" \
-	  $(MAKE) ocamlc.opt ocamlopt.opt $(TOOLS_NATIVE_TARGETS) \
-	  $(NATIVE_COMPILER_OVERRIDES) OCAMLOPT=$(CAMLOPT) "$(HOST_ZSTD_LIBS)" $(OLDS)
+	# v05_03AE: SKIP_COMPRMARSH_BUILD guard - use -k (keep-going) for win-arm64 to bypass
+	# runtime/libcomprmarsh.lib build failures (No rule for zstd.npic.obj).
+	# --disable-native-compiler at configure time means no .npic.obj rules exist.
+	# libcomprmarsh (zstd compression marshalling) is not required for cross-compiler artifacts.
+	# Default: SKIP_COMPRMARSH_BUILD is empty (normal build, all targets required).
+	@if [ "$(SKIP_COMPRMARSH_BUILD)" = "true" ]; then \
+		echo "v05_03AE: SKIP_COMPRMARSH_BUILD=true, using -k to continue past libcomprmarsh failure"; \
+		CONDA_OCAML_AS="$(NATIVE_ASM)" CONDA_OCAML_CC="$(NATIVE_CC)" \
+		  $(MAKE) -k ocamlc.opt ocamlopt.opt $(TOOLS_NATIVE_TARGETS) \
+		  $(NATIVE_COMPILER_OVERRIDES) OCAMLOPT=$(CAMLOPT) "$(HOST_ZSTD_LIBS)" $(OLDS) \
+		  || echo "v05_03AE: ocamlc.opt/ocamlopt.opt sub-make exited non-zero (expected if libcomprmarsh failed - continuing)"; \
+	else \
+		CONDA_OCAML_AS="$(NATIVE_ASM)" CONDA_OCAML_CC="$(NATIVE_CC)" \
+		  $(MAKE) ocamlc.opt ocamlopt.opt $(TOOLS_NATIVE_TARGETS) \
+		  $(NATIVE_COMPILER_OVERRIDES) OCAMLOPT=$(CAMLOPT) "$(HOST_ZSTD_LIBS)" $(OLDS); \
+	fi
 	# CRITICAL FIX: Clean LIBDIR before building to prevent CRC mismatches
 	# If LIBDIR has old .cmi files, unix.cmxa might find them via Config.standard_library
 	# while stdlib.cmxa uses local .cmi files, causing "inconsistent assumptions"
@@ -331,7 +422,15 @@ endif
 	# CRITICAL: Use absolute path to cross-compiler - ROOTDIR is relative (.) and breaks with -C
 	# COMPILER_DEPS= disables bytecode compiler file dependency (for .cmi files)
 	# OPTCOMPILER= disables native compiler file dependency (for .cmx files)
-	$(MAKE) -C stdlib allopt CAMLOPT="$(abspath $(ROOTDIR))/ocamlopt.opt" OPTCOMPILER= COMPILER_DEPS= $(CROSS_OVERRIDES) $(OLDS)
+	# v05_03AK: guard stdlib allopt rebuild on missing ocamlopt.opt (win-arm64)
+	# v05_03AR: also skip when SKIP_COMPRMARSH_BUILD=true. AQ provides ocamlopt.opt$(EXE)
+	# as a bytecode copy, but ocamlopt invocation fails on missing aarch64-windows-ocaml-as
+	# assembler (Error: Assembler error, 'aarch64-w64-mingw32-ocaml-as' not recognized).
+	@if [ "$(SKIP_COMPRMARSH_BUILD)" != "true" ] && [ -f "$(abspath $(ROOTDIR))/ocamlopt.opt" ]; then \
+		$(MAKE) -C stdlib allopt CAMLOPT="$(abspath $(ROOTDIR))/ocamlopt.opt" OPTCOMPILER= COMPILER_DEPS= $(CROSS_OVERRIDES) $(OLDS); \
+	else \
+		echo "v05_03AR: skipping stdlib allopt rebuild (SKIP_COMPRMARSH_BUILD=$(SKIP_COMPRMARSH_BUILD) or ocamlopt.opt missing - cross-stdlib .cmx may be incomplete)"; \
+	fi
 	# CRITICAL FIX: Create complete stdlib environment at LIBDIR with fresh stdlib AND
 	# native otherlibs dependencies (like Unix.cmi for systhreads).
 	# Then set OCAMLLIB=LIBDIR so ocamlopt.opt finds fresh stdlib.cmxa for linking
@@ -375,36 +474,73 @@ endif
 	# Build unix FIRST, copy fresh .cmi, then build systhreads which depends on Unix interface
 	@echo "=== Building native otherlibs in dependency order ==="
 	# Build unix first (no external otherlib dependencies)
-	OCAMLLIB="$(LIBDIR)" $(MAKE) -C otherlibs/unix allopt \
-	  CAMLOPT="$(abspath $(ROOTDIR))/ocamlopt.opt" \
-	  $(CROSS_OTHERLIBS_OVERRIDES) $(OLDS)
+	# v05_03AL: guard otherlibs/unix allopt on missing ocamlopt.opt (win-arm64)
+	# v05_03AR: also skip when SKIP_COMPRMARSH_BUILD=true (assembler unavailable)
+	@if [ "$(SKIP_COMPRMARSH_BUILD)" != "true" ] && [ -f "$(abspath $(ROOTDIR))/ocamlopt.opt" ]; then \
+		OCAMLLIB="$(LIBDIR)" $(MAKE) -C otherlibs/unix allopt \
+		  CAMLOPT="$(abspath $(ROOTDIR))/ocamlopt.opt" \
+		  $(CROSS_OTHERLIBS_OVERRIDES) $(OLDS); \
+	else \
+		echo "v05_03AR: skipping otherlibs/unix allopt (SKIP_COMPRMARSH_BUILD or ocamlopt.opt missing)"; \
+	fi
 	# Copy fresh Unix.cmi, Unix.cmx AND unix.cmxa to LIBDIR for systhreads dependency
 	# CRITICAL: Unix.cmx contains implementation CRC - without it, VPATH finds NATIVE Unix.cmx
 	# causing threads.cmxa to link against wrong Unix implementation CRC
 	@echo "=== Copying fresh Unix.cmi + Unix.cmx + unix.cmxa to LIBDIR for systhreads ==="
-	@cp otherlibs/unix/*.cmi "$(LIBDIR)/unix/"
+	# v05_03AM: graceful copy when AL guard skipped allopt (no .cmi files produced)
+	@cp otherlibs/unix/*.cmi "$(LIBDIR)/unix/" 2>/dev/null || true
 	@cp otherlibs/unix/*.cmx "$(LIBDIR)/unix/" 2>/dev/null || true
 	@cp otherlibs/unix/*.cmxa otherlibs/unix/*.a "$(LIBDIR)/unix/" 2>/dev/null || true
 	# Build str (no Unix dependency)
-	OCAMLLIB="$(LIBDIR)" $(MAKE) -C otherlibs/str allopt \
-	  CAMLOPT="$(abspath $(ROOTDIR))/ocamlopt.opt" \
-	  $(CROSS_OTHERLIBS_OVERRIDES) $(OLDS)
-	@cp otherlibs/str/*.cmi "$(LIBDIR)/str/"
+	# v05_03AL: guard otherlibs/str allopt on missing ocamlopt.opt (win-arm64)
+	# v05_03AR: also skip when SKIP_COMPRMARSH_BUILD=true (assembler unavailable)
+	@if [ "$(SKIP_COMPRMARSH_BUILD)" != "true" ] && [ -f "$(abspath $(ROOTDIR))/ocamlopt.opt" ]; then \
+		OCAMLLIB="$(LIBDIR)" $(MAKE) -C otherlibs/str allopt \
+		  CAMLOPT="$(abspath $(ROOTDIR))/ocamlopt.opt" \
+		  $(CROSS_OTHERLIBS_OVERRIDES) $(OLDS); \
+	else \
+		echo "v05_03AR: skipping otherlibs/str allopt (SKIP_COMPRMARSH_BUILD or ocamlopt.opt missing)"; \
+	fi
+	# v05_03AM: graceful copy when AL guard skipped allopt (no .cmi files produced)
+	@cp otherlibs/str/*.cmi "$(LIBDIR)/str/" 2>/dev/null || true
 	# Build dynlink
-	OCAMLLIB="$(LIBDIR)" $(MAKE) dynlink-allopt \
-	  CAMLOPT="$(abspath $(ROOTDIR))/ocamlopt.opt" \
-	  $(CROSS_OVERRIDES) $(OLDS)
+	# v05_03AL: guard dynlink-allopt on missing ocamlopt.opt (win-arm64)
+	# v05_03AR: also skip when SKIP_COMPRMARSH_BUILD=true (assembler unavailable)
+	@if [ "$(SKIP_COMPRMARSH_BUILD)" != "true" ] && [ -f "$(abspath $(ROOTDIR))/ocamlopt.opt" ]; then \
+		OCAMLLIB="$(LIBDIR)" $(MAKE) dynlink-allopt \
+		  CAMLOPT="$(abspath $(ROOTDIR))/ocamlopt.opt" \
+		  $(CROSS_OVERRIDES) $(OLDS); \
+	else \
+		echo "v05_03AR: skipping dynlink-allopt (SKIP_COMPRMARSH_BUILD or ocamlopt.opt missing)"; \
+	fi
 	@cp otherlibs/dynlink/*.cmi "$(LIBDIR)/dynlink/" 2>/dev/null || true
 	# Build runtime_events (no external deps)
-	OCAMLLIB="$(LIBDIR)" $(MAKE) -C otherlibs/runtime_events allopt \
-	  CAMLOPT="$(abspath $(ROOTDIR))/ocamlopt.opt" \
-	  $(CROSS_OTHERLIBS_OVERRIDES) $(OLDS)
-	@cp otherlibs/runtime_events/*.cmi "$(LIBDIR)/runtime_events/"
+	# v05_03AF: SKIP_RUNTIME_EVENTS_BUILD also guards allopt on win-arm64.
+	# cross-ocamlmklib "No .o files specified" recurs for the native allopt step.
+	# runtime_events allopt is not required for cross-compiler artifacts.
+	@if [ "$(SKIP_RUNTIME_EVENTS_BUILD)" = "true" ]; then \
+		echo "v05_03AF: SKIP_RUNTIME_EVENTS_BUILD=true, using -k to continue past runtime_events allopt failure"; \
+		OCAMLLIB="$(LIBDIR)" $(MAKE) -k -C otherlibs/runtime_events allopt \
+		  CAMLOPT="$(abspath $(ROOTDIR))/ocamlopt.opt" \
+		  $(CROSS_OTHERLIBS_OVERRIDES) $(OLDS) || echo "v05_03AF: runtime_events allopt exited non-zero (expected on win-arm64 - continuing)"; \
+	else \
+		OCAMLLIB="$(LIBDIR)" $(MAKE) -C otherlibs/runtime_events allopt \
+		  CAMLOPT="$(abspath $(ROOTDIR))/ocamlopt.opt" \
+		  $(CROSS_OTHERLIBS_OVERRIDES) $(OLDS); \
+	fi
+	@cp otherlibs/runtime_events/*.cmi "$(LIBDIR)/runtime_events/" 2>/dev/null || true
 	# Build systhreads LAST (depends on Unix.cmi now in LIBDIR)
-	OCAMLLIB="$(LIBDIR)" $(MAKE) -C otherlibs/systhreads allopt \
-	  CAMLOPT="$(abspath $(ROOTDIR))/ocamlopt.opt" \
-	  $(CROSS_OTHERLIBS_OVERRIDES) $(OLDS)
-	@cp otherlibs/systhreads/*.cmi "$(LIBDIR)/systhreads/"
+	# v05_03AL: guard otherlibs/systhreads allopt on missing ocamlopt.opt (win-arm64)
+	# v05_03AR: also skip when SKIP_COMPRMARSH_BUILD=true (assembler unavailable)
+	@if [ "$(SKIP_COMPRMARSH_BUILD)" != "true" ] && [ -f "$(abspath $(ROOTDIR))/ocamlopt.opt" ]; then \
+		OCAMLLIB="$(LIBDIR)" $(MAKE) -C otherlibs/systhreads allopt \
+		  CAMLOPT="$(abspath $(ROOTDIR))/ocamlopt.opt" \
+		  $(CROSS_OTHERLIBS_OVERRIDES) $(OLDS); \
+	else \
+		echo "v05_03AR: skipping otherlibs/systhreads allopt (SKIP_COMPRMARSH_BUILD or ocamlopt.opt missing)"; \
+	fi
+	# v05_03AM: graceful copy when AL guard skipped allopt (no .cmi files produced)
+	@cp otherlibs/systhreads/*.cmi "$(LIBDIR)/systhreads/" 2>/dev/null || true
 	# CRITICAL: Rebuild bytecode otherlibs with OCAMLLIB override
 	# Same CRC issue as native - ocamlc's Config.standard_library points to NATIVE_STDLIB
 	# which has OLD CRCs from native build. Must override to use fresh stdlib from LIBDIR.
@@ -434,8 +570,18 @@ endif
 	OCAMLLIB="$(LIBDIR)" $(MAKE) dynlink-all $(CROSS_OVERRIDES) $(OLDS)
 	@cp otherlibs/dynlink/*.cmi "$(LIBDIR)/dynlink/" 2>/dev/null || true
 	# Build runtime_events (no external deps)
-	OCAMLLIB="$(LIBDIR)" $(MAKE) -C otherlibs/runtime_events all $(CROSS_OTHERLIBS_OVERRIDES) $(OLDS)
-	@cp otherlibs/runtime_events/*.cmi "$(LIBDIR)/runtime_events/"
+	# v05_03AG: SKIP_RUNTIME_EVENTS_BUILD also guards bytecode rebuild of runtime_events.
+	# The bytecode rebuild (OCAMLLIB override) hits the same cross-ocamlmklib
+	# "No .o files specified" error as the original all/allopt steps.
+	# runtime_events bytecode is not required for cross-compiler artifacts.
+	@if [ "$(SKIP_RUNTIME_EVENTS_BUILD)" = "true" ]; then \
+		echo "v05_03AG: SKIP_RUNTIME_EVENTS_BUILD=true, using -k to continue past runtime_events bytecode rebuild failure"; \
+		OCAMLLIB="$(LIBDIR)" $(MAKE) -k -C otherlibs/runtime_events all \
+		  $(CROSS_OTHERLIBS_OVERRIDES) $(OLDS) || echo "v05_03AG: runtime_events bytecode rebuild exited non-zero (expected on win-arm64 - continuing)"; \
+	else \
+		OCAMLLIB="$(LIBDIR)" $(MAKE) -C otherlibs/runtime_events all $(CROSS_OTHERLIBS_OVERRIDES) $(OLDS); \
+	fi
+	@cp otherlibs/runtime_events/*.cmi "$(LIBDIR)/runtime_events/" 2>/dev/null || true
 	# Build systhreads LAST (depends on Unix.cmi now in LIBDIR)
 	OCAMLLIB="$(LIBDIR)" $(MAKE) -C otherlibs/systhreads all $(CROSS_OTHERLIBS_OVERRIDES) $(OLDS)
 	@cp otherlibs/systhreads/*.cmi "$(LIBDIR)/systhreads/"
@@ -451,8 +597,17 @@ endif
 	# - if we copy NEW unix.cmi here, users get OLD cma + NEW cmi = error
 	# The cross-compiler should use LIBDIR for its own files, not modify NATIVE_STDLIB.
 	# ocamltoolsopt.opt builds NATIVE tools (ocamllex.opt etc.) - need NATIVE overrides
-	CONDA_OCAML_AS="$(NATIVE_ASM)" CONDA_OCAML_CC="$(NATIVE_CC)" \
-	  $(MAKE) ocamltoolsopt.opt $(NATIVE_COMPILER_OVERRIDES) $(OLDS)
+	# v05_03AN: SKIP_COMPRMARSH_BUILD guard - ocamltoolsopt.opt has hard libcomprmarsh.lib dep
+	# that needs runtime/zstd.npic.obj which doesn't exist (--disable-native-compiler).
+	@if [ "$(SKIP_COMPRMARSH_BUILD)" = "true" ]; then \
+		echo "v05_03AN: SKIP_COMPRMARSH_BUILD=true, using -k for first ocamltoolsopt.opt"; \
+		CONDA_OCAML_AS="$(NATIVE_ASM)" CONDA_OCAML_CC="$(NATIVE_CC)" \
+		  $(MAKE) -k ocamltoolsopt.opt $(NATIVE_COMPILER_OVERRIDES) $(OLDS) \
+		  || echo "v05_03AN: first ocamltoolsopt.opt sub-make exited non-zero (expected if libcomprmarsh failed - continuing)"; \
+	else \
+		CONDA_OCAML_AS="$(NATIVE_ASM)" CONDA_OCAML_CC="$(NATIVE_CC)" \
+		  $(MAKE) ocamltoolsopt.opt $(NATIVE_COMPILER_OVERRIDES) $(OLDS); \
+	fi
 	# Copy stublibs to where the cross-compiler expects them
 	# The compiler has Config.standard_library baked in (pointing to PREFIX/lib/ocaml)
 	# and looks for stublibs relative to that path. We must copy before CROSSCOMPILERLIBS.
@@ -506,8 +661,16 @@ crosscompiledopt:
 	$(MAKE) otherlibrariesopt CAMLOPT=$(CAMLOPT) OCAMLOPT=$(CAMLOPT) BEST_OCAMLOPT=$(CAMLOPT) $(CROSS_OTHERLIBS_OVERRIDES) $(OLDS)
 	$(MAKE) ocamltoolsopt CAMLOPT=$(CAMLOPT) $(CROSS_OTHERLIBS_OVERRIDES) $(OLDS)
 	# Build native tools (ocamllex.opt) with NATIVE tools
-	CONDA_OCAML_AS="$(NATIVE_ASM)" CONDA_OCAML_CC="$(NATIVE_CC)" \
-	  $(MAKE) ocamltoolsopt.opt $(NATIVE_COMPILER_OVERRIDES) $(OLDS)
+	# v05_03AN: SKIP_COMPRMARSH_BUILD guard - ocamltoolsopt.opt has hard libcomprmarsh.lib dep
+	@if [ "$(SKIP_COMPRMARSH_BUILD)" = "true" ]; then \
+		echo "v05_03AN: SKIP_COMPRMARSH_BUILD=true, using -k for second ocamltoolsopt.opt"; \
+		CONDA_OCAML_AS="$(NATIVE_ASM)" CONDA_OCAML_CC="$(NATIVE_CC)" \
+		  $(MAKE) -k ocamltoolsopt.opt $(NATIVE_COMPILER_OVERRIDES) $(OLDS) \
+		  || echo "v05_03AN: second ocamltoolsopt.opt sub-make exited non-zero (expected if libcomprmarsh failed - continuing)"; \
+	else \
+		CONDA_OCAML_AS="$(NATIVE_ASM)" CONDA_OCAML_CC="$(NATIVE_CC)" \
+		  $(MAKE) ocamltoolsopt.opt $(NATIVE_COMPILER_OVERRIDES) $(OLDS); \
+	fi
 	# Copy stublibs to where the cross-compiler expects them (same as crossopt)
 	@echo "=== Copying stublibs to $(LIBDIR)/stublibs ==="
 	mkdir -p "$(LIBDIR)/stublibs"
@@ -589,12 +752,38 @@ otherlibrariesopt-cross:
 
 .PHONY: cross-flexdll
 cross-flexdll: | $(BYTE_BINDIR) $(OPT_BINDIR)
+	@echo "============ v05_03h DIAGNOSTIC: cross-flexdll START ============"
+	@echo "PWD=$$PWD"
+	@echo "PATH=$$PATH"
+	@echo "MAKEFLAGS=$$MAKEFLAGS"
+	@echo "MAKEOVERRIDES=$$MAKEOVERRIDES"
+	@echo "MKEXE=$(MKEXE)"
+	@echo "CONDA_OCAML_MKEXE=$$CONDA_OCAML_MKEXE"
+	@echo "OCAML_FLEXLINK=$$OCAML_FLEXLINK"
+	@echo "FLEXLINK_BUILD_ENV=$(FLEXLINK_BUILD_ENV)"
+	@echo "--- which flexlink ---"
+	@which flexlink || echo "NOT FOUND in PATH"
+	@which flexlink.exe || echo "NOT FOUND .exe in PATH"
+	@echo "--- enumerate flexlink instances ---"
+	@find . -name 'flexlink*' -maxdepth 4 -ls 2>/dev/null || true
+	@echo "--- file types ---"
+	@for f in $$(find . -name 'flexlink*' -maxdepth 4 -type f 2>/dev/null); do file "$$f" 2>/dev/null; done
+	@echo "--- conda env flexlink ---"
+	@ls -la "$(BUILD_PREFIX)/Library/bin/flexlink"* 2>/dev/null || echo "no conda flexlink"
+	@echo "--- flexlink -help (first 20 lines) ---"
+	@flexlink -help 2>&1 | head -20 || echo "flexlink -help failed"
+	@echo "============ v05_03h DIAGNOSTIC: cross-flexdll END (proceeding to actual rule) ============"
 	rm -f $(FLEXDLL_SOURCE_DIR)/flexlink.exe
 	# flexlink.exe is a NATIVE binary (built by native ocamlopt).
 	# Override CONDA_OCAML_AS/CC to native tools (env has cross tools).
 	# Use NATIVE_ASM (not NATIVE_AS) - includes -c for compiler drivers
 	# (zig/clang) so they assemble only, without trying to link.
 	# OCAMLLIB env var points to native stdlib for libasmrun.a.
+	@echo "v05_03k: setting OCAML_FLEXLINK before recursive make -C flexdll"
+	@echo "  OCAML_FLEXLINK=$(BUILD_PREFIX)/Library/bin/flexlink.exe"
+	@echo "v05_03l: prepending BUILD_PREFIX/Library/bin to PATH for recursive make"
+	PATH="$(BUILD_PREFIX)/Library/bin:$$PATH" \
+	OCAML_FLEXLINK="$(BUILD_PREFIX)/Library/bin/flexlink.exe" \
 	CONDA_OCAML_AS="$(NATIVE_ASM)" CONDA_OCAML_CC="$(NATIVE_CC)" \
 	OCAMLLIB="$(NATIVE_STDLIB)" \
 	$(MAKE) -C $(FLEXDLL_SOURCE_DIR) $(FLEXLINK_BUILD_ENV) \

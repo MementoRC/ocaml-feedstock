@@ -937,7 +937,15 @@ transfer_to_prefix() {
   local dest_dir="$2"
 
   echo "=== Transferring ${src_dir} to ${dest_dir} ==="
-  tar -C "${src_dir}" -cf - . | tar -C "${dest_dir}" -xf -
+  # v05_03BK: convert Windows paths via cygpath when running under MSYS2;
+  # tar interprets backslashes/colons as remote-host syntax otherwise.
+  local _bk_src="${src_dir}" _bk_dst="${dest_dir}"
+  if command -v cygpath >/dev/null 2>&1; then
+    _bk_src="$(cygpath -u "${src_dir}")"
+    _bk_dst="$(cygpath -u "${dest_dir}")"
+  fi
+  mkdir -p "${_bk_dst}"
+  tar -C "${_bk_src}" -cf - . | tar -C "${_bk_dst}" -xf -
 
   local config_file="${dest_dir}/lib/ocaml/Makefile.config"
   sed -i "s#${src_dir}#${dest_dir}#g" "${config_file}"
