@@ -191,16 +191,16 @@ SAK_BYTECCLIBS ?= $(BYTECCLIBS)
 BYTECODE_RUNTIME_VARS = \
   SAK_CC='$(SAK_CC)' SAK_CFLAGS='$(SAK_CFLAGS)' \
   'SAK_LINK=$(SAK_CC) $(SAK_LDFLAGS) $$(OUTPUTEXE)$$(1) $$(2)' \
-  'MKEXE=$(SAK_CC) $(SAK_CFLAGS) $(SAK_LDFLAGS) -Wl,--subsystem,console' \
+  'MKEXE=$(SAK_CC) $(SAK_CFLAGS) $(SAK_LDFLAGS) -mconsole' \
   'BYTECCLIBS=$(SAK_BYTECCLIBS) flexdll_stub.$$(O)'
 # BYTECODE_RUNTIME_VARS_WITH_STUB: adds runtime_winmain_stub.obj to BYTECCLIBS.
-# zig's lld maps wmain() → GUI CRT (crtexewin.obj), ignoring -Wl,--subsystem,console.
-# The stub provides WinMain()+main() so lld "defaults to /subsystem:console" and uses
-# mainCRTStartup. main() calls wmain() via CommandLineToArgvW for proper wide argv.
+# zig's lld maps wmain() → GUI CRT (crtexewin.obj) on ARM64; -mconsole is zig's own
+# flag controlling CRT selection before lld-link (unlike -Wl,--subsystem,console which
+# zig ignores). WinMain stub remains as safety net if -mconsole is unsupported.
 BYTECODE_RUNTIME_VARS_WITH_STUB = \
   SAK_CC='$(SAK_CC)' SAK_CFLAGS='$(SAK_CFLAGS)' \
   'SAK_LINK=$(SAK_CC) $(SAK_LDFLAGS) $$(OUTPUTEXE)$$(1) $$(2)' \
-  'MKEXE=$(SAK_CC) $(SAK_CFLAGS) $(SAK_LDFLAGS) -Wl,--subsystem,console' \
+  'MKEXE=$(SAK_CC) $(SAK_CFLAGS) $(SAK_LDFLAGS) -mconsole' \
   'BYTECCLIBS=$(SAK_BYTECCLIBS) flexdll_stub.$$(O) runtime_winmain_stub.$$(O)'
 
 .PHONY: crossopt
@@ -211,7 +211,7 @@ crossopt: cross-flexdll
 	# generated MKEXE (flexlink arm64) is wrong for all exe targets.
 	# Modify the source file so ALL submakes read the correct value.
 	cp Makefile.config Makefile.config.crossopt_bak
-	sed -i 's|^MKEXE=.*|MKEXE=$(SAK_CC) -Wl,--subsystem,console|' Makefile.config
+	sed -i 's|^MKEXE=.*|MKEXE=$(SAK_CC) -mconsole|' Makefile.config
 	@echo "=== CROSSOPT DEBUG: MKEXE after sed ==="
 	@grep '^MKEXE=' Makefile.config || echo "MKEXE line not found!"
 	@echo "=== CROSSOPT DEBUG: SAK_CC=$(SAK_CC) MKEXE=$(MKEXE) ==="
@@ -260,7 +260,7 @@ crossopt: cross-flexdll
 else
 crossopt:
 	cp Makefile.config Makefile.config.crossopt_bak
-	sed -i 's|^MKEXE=.*|MKEXE=$(SAK_CC) -Wl,--subsystem,console|' Makefile.config
+	sed -i 's|^MKEXE=.*|MKEXE=$(SAK_CC) -mconsole|' Makefile.config
 	rm -f runtime/*.$(O) runtime/*.$(A)
 	printf '%s\n' \
 	  '#include <windows.h>' \
@@ -589,6 +589,27 @@ otherlibrariesopt-cross:
 
 .PHONY: cross-flexdll
 cross-flexdll: | $(BYTE_BINDIR) $(OPT_BINDIR)
+	@echo "============ v05_03h DIAGNOSTIC: cross-flexdll START ============"
+	@echo "PWD=$$PWD"
+	@echo "PATH=$$PATH"
+	@echo "MAKEFLAGS=$$MAKEFLAGS"
+	@echo "MAKEOVERRIDES=$$MAKEOVERRIDES"
+	@echo "MKEXE=$(MKEXE)"
+	@echo "CONDA_OCAML_MKEXE=$$CONDA_OCAML_MKEXE"
+	@echo "OCAML_FLEXLINK=$$OCAML_FLEXLINK"
+	@echo "FLEXLINK_BUILD_ENV=$(FLEXLINK_BUILD_ENV)"
+	@echo "--- which flexlink ---"
+	@which flexlink || echo "NOT FOUND in PATH"
+	@which flexlink.exe || echo "NOT FOUND .exe in PATH"
+	@echo "--- enumerate flexlink instances ---"
+	@find . -name 'flexlink*' -maxdepth 4 -ls 2>/dev/null || true
+	@echo "--- file types ---"
+	@for f in $$(find . -name 'flexlink*' -maxdepth 4 -type f 2>/dev/null); do file "$$f" 2>/dev/null; done
+	@echo "--- conda env flexlink ---"
+	@ls -la "$(BUILD_PREFIX)/Library/bin/flexlink"* 2>/dev/null || echo "no conda flexlink"
+	@echo "--- flexlink -help (first 20 lines) ---"
+	@flexlink -help 2>&1 | head -20 || echo "flexlink -help failed"
+	@echo "============ v05_03h DIAGNOSTIC: cross-flexdll END (proceeding to actual rule) ============"
 	rm -f $(FLEXDLL_SOURCE_DIR)/flexlink.exe
 	# flexlink.exe is a NATIVE binary (built by native ocamlopt).
 	# Override CONDA_OCAML_AS/CC to native tools (env has cross tools).
