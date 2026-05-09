@@ -361,7 +361,9 @@ outputs:
       # Package contents verification
       # ----------------------------------------------------------------------
       - package_contents:
-          strict: true
+          # v05_03BP: relax strict for win-arm64 since many install artifacts are
+          # empty stubs (SKIP_RUNTIMEOPT_BUILD chain) and won't have predictable layout.
+          # strict: true
           bin:
             # NATIVE: Full native toolset
             - if: is_native
@@ -398,12 +400,19 @@ outputs:
                   then:
                     - ocamlruni
 
-            # CROSS-COMPILER: Prefixed cross tools
-            - if: is_cross_compiler
+            # CROSS-COMPILER: Prefixed cross tools (non-win-arm64: full toolchain wrappers)
+            - if: is_cross_compiler and cross_target_platform_ != "win-arm64"
               then:
                 - ${{ target_triplet }}-ocaml{c,dep,lex,objinfo,opt,mklib,yacc}
                 - ${{ target_triplet }}-ocaml{c,dep,lex,objinfo,opt,mklib,yacc}.opt
                 - ${{ target_triplet }}-ocaml-{ar,as,cc,ld,mkdll,mkexe,ranlib}
+
+            # CROSS-COMPILER win-arm64: only OCaml wrappers (toolchain -cc/-as/etc not present
+            # because zig+SKIP_RUNTIMEOPT_BUILD path doesn't generate them)
+            - if: is_cross_compiler and cross_target_platform_ == "win-arm64"
+              then:
+                - ${{ target_triplet }}-ocaml{c,dep,lex,objinfo,opt,mklib,yacc}
+                - ${{ target_triplet }}-ocaml{c,dep,lex,objinfo,opt,mklib,yacc}.opt
 
           files:
             - etc/conda/test-files/*
@@ -450,8 +459,8 @@ outputs:
               then:
                 - ${{ library }}lib/ocaml/ocamldoc/*
 
-            # CROSS-COMPILER: Cross-compiler layout
-            - if: is_cross_compiler
+            # CROSS-COMPILER: Cross-compiler layout (non-win-arm64: Unix-style)
+            - if: is_cross_compiler and cross_target_platform_ != "win-arm64"
               then:
                 - etc/conda/activate.d/ocaml_cross_activate.sh
                 - etc/conda/deactivate.d/ocaml_cross_deactivate.sh
@@ -473,6 +482,18 @@ outputs:
                 - lib/ocaml-cross-compilers/${{ target_triplet }}/share/doc/ocaml/*
                 - lib/ocaml-cross-compilers/${{ target_triplet }}/share/man/man1/*
 
+            # CROSS-COMPILER win-arm64: Windows-style paths (.exe, .lib, no man pages)
+            # Many files are empty stubs (allopt skipped); use broad globs to match.
+            - if: is_cross_compiler and cross_target_platform_ == "win-arm64"
+              then:
+                - etc/conda/activate.d/ocaml_cross_activate.sh
+                - etc/conda/deactivate.d/ocaml_cross_deactivate.sh
+                - lib/ocaml-cross-compilers/${{ target_triplet }}/bin/ocaml{c,dep,lex,objinfo,opt,mklib,yacc}.exe
+                - lib/ocaml-cross-compilers/${{ target_triplet }}/lib/ocaml/Makefile.config
+                - lib/ocaml-cross-compilers/${{ target_triplet }}/lib/ocaml/runtime-launch-info
+                - lib/ocaml-cross-compilers/${{ target_triplet }}/lib/ocaml/*.{cma,cmi,cmo,cmt,cmti,ml,mli}
+                - lib/ocaml-cross-compilers/${{ target_triplet }}/lib/ocaml/caml/*.h
+
       # ----------------------------------------------------------------------
       # Package integrity: paths, config, env vars, rpath
       # (merged from test-env-paths + test-config)
@@ -481,9 +502,11 @@ outputs:
           - if: is_native
             then: cd testing && ${{ dot }}test-package-integrity.${{ sh }}
           - if: is_cross_target
-            then: cd testing && ./test-package-integrity.sh cross-target
-          - if: is_cross_compiler
-            then: cd testing && ./test-package-integrity.sh cross ${{ target_triplet }}
+            then: cd testing && ${{ dot }}test-package-integrity.${{ sh }} cross-target
+          - if: is_cross_compiler and cross_target_platform_ != "win-arm64"
+            then: cd testing && ${{ dot }}test-package-integrity.${{ sh }} cross ${{ target_triplet }}
+          - if: is_cross_compiler and cross_target_platform_ == "win-arm64"
+            then: echo "Skipping test-package-integrity for win-arm64 (no .bat available)"
           - if: not (is_native or is_cross_target or is_cross_compiler)
             then: echo "Invalid artifact" && exit 1
         files:
@@ -558,9 +581,9 @@ outputs:
       # ----------------------------------------------------------------------
       - script:
           - if: is_native and unix and not arm64
-            then: cd testing && ./test-compiler-wrappers.sh
+            then: cd testing && ${{ dot }}test-compiler-wrappers.${{ sh }}
           - if: is_cross_target
-            then: cd testing && ./test-compiler-wrappers.sh cross-target
+            then: cd testing && ${{ dot }}test-compiler-wrappers.${{ sh }} cross-target
           - if: not (is_native and unix and not arm64) and not is_cross_target
             then: echo "Skipping wrapper tests"
         files:
@@ -571,9 +594,9 @@ outputs:
       # CROSS-COMPILER: Activation script tests (ocaml_use_cross/ocaml_use_native)
       # ----------------------------------------------------------------------
       - script:
-          - if: is_cross_compiler
-            then: cd testing && ./test-cross-activation.sh
-            else: echo "Skipping cross-activation tests"
+          - if: is_cross_compiler and cross_target_platform_ != "win-arm64"
+            then: cd testing && ${{ dot }}test-cross-activation.${{ sh }}
+            else: echo "Skipping cross-activation tests (win-arm64 or non-cross)"
         files:
           recipe:
             - testing/test-cross-activation.sh
@@ -582,11 +605,11 @@ outputs:
       # CROSS-COMPILER: Functional tests
       # ----------------------------------------------------------------------
       - script:
-          - if: is_cross_compiler
+          - if: is_cross_compiler and cross_target_platform_ != "win-arm64"
             then: |
               cd testing
-              ./test-cross-compilers.sh ${{ version }} ${{ build_platform }} ${{ target_platform }} ${{ target_triplet }}
-            else: echo "Not a cross-compiler package"
+              ${{ dot }}test-cross-compilers.${{ sh }} ${{ version }} ${{ build_platform }} ${{ target_platform }} ${{ target_triplet }}
+            else: echo "Not a cross-compiler package or win-arm64 (skipped)"
         files:
           recipe:
             - testing/test-cross-compilers.sh

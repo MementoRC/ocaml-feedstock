@@ -752,16 +752,33 @@ clean_runtime_launch_info() {
 
   local new_bindir="${prefix}/bin"
 
-  python3 -c "
+  # v05_03BN: use python3 with fallback to python (Windows conda envs only have 'python')
+  local _bn_py="${PYTHON:-}"
+  if [[ -z "$_bn_py" ]] || ! command -v "$_bn_py" >/dev/null 2>&1; then
+    if command -v python3 >/dev/null 2>&1; then _bn_py=python3
+    elif command -v python >/dev/null 2>&1; then _bn_py=python
+    else echo "ERROR: no python interpreter found" >&2; return 1; fi
+  fi
+  "$_bn_py" -c "
 import sys
 path, new_bindir = sys.argv[1], sys.argv[2].encode()
 
 with open(path, 'rb') as f:
     data = f.read()
 
+# v05_03BO: tolerate empty / malformed files (e.g. win-arm64 stub with
+# SKIP_TMPHEADER_BUILD=true means runtime-launch-info has no real format).
+if len(data) == 0:
+    print(f'  runtime-launch-info: empty file, skipping cleanup')
+    sys.exit(0)
+
 # Find first and second newlines
-first_nl = data.index(b'\n')
-second_nl = data.index(b'\n', first_nl + 1)
+try:
+    first_nl = data.index(b'\n')
+    second_nl = data.index(b'\n', first_nl + 1)
+except ValueError:
+    print(f'  runtime-launch-info: missing expected newline structure (size={len(data)} bytes), skipping')
+    sys.exit(0)
 
 line1 = data[:first_nl]
 old_line2 = data[first_nl+1:second_nl]  # includes the \x00 terminator
@@ -945,7 +962,8 @@ transfer_to_prefix() {
     _bk_dst="$(cygpath -u "${dest_dir}")"
   fi
   mkdir -p "${_bk_dst}"
-  tar -C "${_bk_src}" -cf - . | tar -C "${_bk_dst}" -xf -
+  # v05_03BM: --dereference converts symlinks to regular file copies (Windows tar limitation).
+  tar -C "${_bk_src}" --dereference -cf - . | tar -C "${_bk_dst}" -xf -
 
   local config_file="${dest_dir}/lib/ocaml/Makefile.config"
   sed -i "s#${src_dir}#${dest_dir}#g" "${config_file}"

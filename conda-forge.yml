@@ -5,7 +5,10 @@ github:
   tooling_branch_name: main
 conda_build:
   error_overlinking: true
-conda_forge_output_validation: true
+# v05_03BT: temporarily disabled for win-arm64 development; ocaml_win-arm64 is
+# not yet registered in conda-forge/feedstock-outputs. RE-ENABLE before merging
+# upstream (will require admin PR to conda-forge/feedstock-outputs first).
+conda_forge_output_validation: false
 build_platform:
   linux_aarch64: linux_64
   linux_ppc64le: linux_64  

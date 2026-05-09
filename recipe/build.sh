@@ -105,7 +105,7 @@ fi
 echo ""
 echo "============================================================"
 echo "OCaml Build Script - Mode Detection"
-echo "  BUILD_SCRIPT_VERSION: 2026-05-09l-v05_03BK-cygpath-tar-windows"
+echo "  BUILD_SCRIPT_VERSION: 2026-05-09u-v05_03BT-disable-output-validation"
 echo "============================================================"
 echo "  OCAML_TARGET_PLATFORM:         ${OCAML_TARGET_PLATFORM:-<not set>}"
 echo "  OCAML_TARGET_TRIPLET:          ${OCAML_TARGET_TRIPLET:-<not set>}"
@@ -5910,7 +5910,24 @@ GNUEOF
     _bk_dst="${OCAML_INSTALL_PREFIX}"
   fi
   mkdir -p "${_bk_dst}"
-  tar -C "${_bk_src}" -cf - . | tar -C "${_bk_dst}" -xf -
+  # v05_03BL: remove dangling symlinks before tar transfer. On win-arm64,
+  # `make installcross` creates ocamlc.exe -> ocamlc.opt.exe (and similar)
+  # symlinks where the .opt.exe target was never built (allopt skipped).
+  # GNU tar exits 1 on dangling symlinks during create, aborting the transfer.
+  if [[ "${OCAML_TARGET_PLATFORM:-}" = "win-arm64" ]]; then
+    _bl_dangling=0
+    while IFS= read -r -d '' _bl_lnk; do
+      if [[ ! -e "$_bl_lnk" ]]; then
+        rm -f "$_bl_lnk"
+        _bl_dangling=$((_bl_dangling+1))
+      fi
+    done < <(find "${OCAML_XCROSS_INSTALL_PREFIX}" -type l -print0 2>/dev/null)
+    echo "    v05_03BL: removed ${_bl_dangling} dangling symlinks from ${OCAML_XCROSS_INSTALL_PREFIX}"
+  fi
+  # v05_03BM: --dereference converts symlinks to regular file copies during tar
+  # creation. MSYS2 tar fails to extract symlinks on Windows due to privilege
+  # limits even when targets exist; dereferencing avoids the problem entirely.
+  tar -C "${_bk_src}" --dereference -cf - . | tar -C "${_bk_dst}" -xf -
 
   # Fix cross-compiler Makefile.config and ld.conf
   for cross_dir in "${OCAML_INSTALL_PREFIX}"/lib/ocaml-cross-compilers/*/; do
