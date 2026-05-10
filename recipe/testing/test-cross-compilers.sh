@@ -30,6 +30,8 @@ get_target_arch() {
   case "${target}" in
     aarch64-*|arm64-*) echo "arm64" ;;
     powerpc64le-*) echo "power" ;;
+    riscv64-*) echo "riscv" ;;
+    s390x-*) echo "s390x" ;;
     x86_64-*|*-x86_64-*) echo "amd64" ;;
     *) echo "amd64" ;;  # default
   esac
@@ -43,6 +45,8 @@ get_target_id() {
   case "${target}" in
     aarch64-conda-linux-gnu) echo "AARCH64" ;;
     powerpc64le-conda-linux-gnu) echo "PPC64LE" ;;
+    riscv64-conda-linux-gnu) echo "RISCV64" ;;
+    s390x-conda-linux-gnu) echo "S390X" ;;
     arm64-apple-darwin*) echo "ARM64" ;;
     x86_64-conda-linux-gnu|x86_64-apple-darwin*) echo "X86_64" ;;
     *) echo "${target}" | cut -d'-' -f1 | tr '[:lower:]' '[:upper:]' ;;
@@ -233,6 +237,14 @@ TESTEOF
           TEST_ERRORS=$((TEST_ERRORS + 1))
         fi
         ;;
+      s390x)
+        if echo "$_file_output" | grep -qiE "IBM S/390|S/390|s390"; then
+          echo "    ✓ Produces s390x binaries"
+        else
+          echo "    ✗ ERROR: Expected s390x, got: $_file_output"
+          TEST_ERRORS=$((TEST_ERRORS + 1))
+        fi
+        ;;
     esac
 
     # Execution test with QEMU if available
@@ -297,6 +309,22 @@ TESTEOF
               power)
                 if echo "${rtlib_arch}" | grep -qi "powerpc\|ppc64"; then
                   echo "    ✓ ${rtname}: PowerPC64"
+                else
+                  echo "    ✗ ERROR: ${rtname} has wrong architecture: ${rtlib_arch}"
+                  TEST_ERRORS=$((TEST_ERRORS + 1))
+                fi
+                ;;
+              riscv)
+                if echo "${rtlib_arch}" | grep -qi "riscv\|risc-v"; then
+                  echo "    ✓ ${rtname}: RISC-V"
+                else
+                  echo "    ✗ ERROR: ${rtname} has wrong architecture: ${rtlib_arch}"
+                  TEST_ERRORS=$((TEST_ERRORS + 1))
+                fi
+                ;;
+              s390x)
+                if echo "${rtlib_arch}" | grep -qiE "s390|S/390"; then
+                  echo "    ✓ ${rtname}: s390x"
                 else
                   echo "    ✗ ERROR: ${rtname} has wrong architecture: ${rtlib_arch}"
                   TEST_ERRORS=$((TEST_ERRORS + 1))
@@ -414,22 +442,25 @@ CONSEOF
     CONFIG_TOOLPREF=$(grep "^TOOLPREF=" "${MAKEFILE_CONFIG}" | head -1 | cut -d= -f2- | xargs || echo "")
 
     # Determine expected toolchain prefix based on target
+    WRONG_PREFIX="x86_64"
     case "${target}" in
       aarch64-conda-linux-gnu)
         EXPECTED_PREFIX="aarch64"
-        WRONG_PREFIX="x86_64"
         ;;
       powerpc64le-conda-linux-gnu)
         EXPECTED_PREFIX="powerpc64le"
-        WRONG_PREFIX="x86_64"
+        ;;
+      riscv64-conda-linux-gnu)
+        EXPECTED_PREFIX="riscv64"
+        ;;
+      s390x-conda-linux-gnu)
+        EXPECTED_PREFIX="s390x"
         ;;
       arm64-apple-darwin*)
         EXPECTED_PREFIX="arm64"
-        WRONG_PREFIX="x86_64"
         ;;
       *)
         EXPECTED_PREFIX=""
-        WRONG_PREFIX=""
         ;;
     esac
 
@@ -807,6 +838,16 @@ if [[ -n "$TARGET_TRIPLE" ]]; then
       QEMU_PREFIX="${PREFIX}/powerpc64le-conda-linux-gnu/sysroot"
       ARCH_NAME="Linux PPC64LE"
       ;;
+    riscv64-conda-linux-gnu)
+      QEMU_CMD="qemu-execve-riscv64"
+      QEMU_PREFIX="${PREFIX}/riscv64-conda-linux-gnu/sysroot"
+      ARCH_NAME="Linux RISCV64"
+      ;;
+    s390x-conda-linux-gnu)
+      QEMU_CMD="qemu-execve-s390x"
+      QEMU_PREFIX="${PREFIX}/s390x-conda-linux-gnu/sysroot"
+      ARCH_NAME="Linux S390X"
+      ;;
     arm64-apple-darwin*)
       QEMU_CMD=""
       QEMU_PREFIX=""
@@ -862,6 +903,28 @@ else
       "Linux PPC64LE" \
       "qemu-execve-ppc64le" \
       "${PREFIX}/powerpc64le-conda-linux-gnu/sysroot"; then
+      :
+    else
+      TOTAL_ERRORS=$((TOTAL_ERRORS + 1))
+    fi
+
+    # Test riscv64 cross-compiler
+    if test_cross_compiler \
+      "riscv64-conda-linux-gnu" \
+      "Linux RISCV64" \
+      "qemu-execve-riscv64" \
+      "${PREFIX}/riscv64-conda-linux-gnu/sysroot"; then
+      :
+    else
+      TOTAL_ERRORS=$((TOTAL_ERRORS + 1))
+    fi
+
+    # Test s390x cross-compiler
+    if test_cross_compiler \
+      "s390x-conda-linux-gnu" \
+      "Linux s390x" \
+      "qemu-execve-s390x" \
+      "${PREFIX}/s390x-conda-linux-gnu/sysroot"; then
       :
     else
       TOTAL_ERRORS=$((TOTAL_ERRORS + 1))

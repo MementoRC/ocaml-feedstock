@@ -68,7 +68,10 @@ _build_c_libs() {
   local lib_name="lib${_name}.a"
 
   debug "Building shared library: $dll_name (target is_windows=${_cross_is_windows})"
-  local cmd=("${CROSS_CC}" -shared ${MACOS_LINK_FLAGS[@]+"${MACOS_LINK_FLAGS[@]}"} -o "$dll_name" "${c_objs[@]}" ${ld_opts[@]+"${ld_opts[@]}"} ${c_libs[@]+"${c_libs[@]}"})
+  # CROSS_CC may be multi-word (e.g. "zig cc -target X"); IFS=$'\n\t' at top removes space as a separator, so use IFS=' ' read -ra to split on spaces explicitly.
+  local _cc_parts=()
+  IFS=' ' read -ra _cc_parts <<< "${CROSS_CC}"
+  local cmd=("${_cc_parts[@]}" -shared ${MACOS_LINK_FLAGS[@]+"${MACOS_LINK_FLAGS[@]}"} -o "$dll_name" "${c_objs[@]}" ${ld_opts[@]+"${ld_opts[@]}"} ${c_libs[@]+"${c_libs[@]}"})
   [[ -n "$verbose" ]] && echo "+ ${cmd[*]}"
   "${cmd[@]}"
 

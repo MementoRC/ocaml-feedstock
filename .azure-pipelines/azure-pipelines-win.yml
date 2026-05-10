@@ -8,9 +8,22 @@ jobs:
     vmImage: windows-2022
   strategy:
     matrix:
+      win_64_c_compilergcccross_target_platform_win-64:
+        CONFIG: win_64_c_compilergcccross_target_platform_win-64
+        UPLOAD_PACKAGES: 'True'
+        store_build_artifacts: false
+      win_64_c_compilervs2022cross_target_platform_win-64:
+        CONFIG: win_64_c_compilervs2022cross_target_platform_win-64
+        UPLOAD_PACKAGES: 'True'
+        store_build_artifacts: false
+      win_64_c_compilervs2022cross_target_platform_win-arm64:
+        CONFIG: win_64_c_compilervs2022cross_target_platform_win-arm64
+        UPLOAD_PACKAGES: 'True'
+        store_build_artifacts: false
       win_64_c_compilerzigcross_target_platform_win-arm64:
         CONFIG: win_64_c_compilerzigcross_target_platform_win-arm64
         UPLOAD_PACKAGES: 'True'
+        store_build_artifacts: false
   timeoutInMinutes: 360
   variables:
     CONDA_BLD_PATH: D:\\bld\\

@@ -5,11 +5,11 @@
 
 [workspace]
 name = "ocaml-feedstock-5.4.0-altc-feedstock"
-version = "3.60.0"  # conda-smithy version used to generate this file
+version = "3.61.2"  # conda-smithy version used to generate this file
 description = "Pixi configuration for conda-forge/ocaml-feedstock-5.4.0-altc-feedstock"
 authors = ["@conda-forge/ocaml-feedstock-5.4.0-altc"]
 channels = ["conda-forge"]
-platforms = ["linux-64", "linux-aarch64", "linux-ppc64le", "osx-64", "osx-arm64", "win-64"]
+platforms = ["linux-64", "linux-aarch64", "osx-64", "osx-arm64", "win-64"]
 requires-pixi = ">=0.59.0"
 
 [dependencies]
@@ -23,36 +23,84 @@ description = "List contents of all packages found in rattler-build build direct
 [tasks.build]
 cmd = "rattler-build build --recipe recipe"
 description = "Build ocaml-feedstock-5.4.0-altc-feedstock directly (without setup scripts), no particular variant specified"
-[tasks."build-linux_64_"]
-cmd = "rattler-build build --recipe recipe -m .ci_support/linux_64_.yaml"
-description = "Build ocaml-feedstock-5.4.0-altc-feedstock with variant linux_64_ directly (without setup scripts)"
-[tasks."inspect-linux_64_"]
-cmd = "inspect_artifacts --recipe-dir recipe -m .ci_support/linux_64_.yaml"
-description = "List contents of ocaml-feedstock-5.4.0-altc-feedstock packages built for variant linux_64_"
-[tasks."build-linux_aarch64_"]
-cmd = "rattler-build build --recipe recipe -m .ci_support/linux_aarch64_.yaml"
-description = "Build ocaml-feedstock-5.4.0-altc-feedstock with variant linux_aarch64_ directly (without setup scripts)"
-[tasks."inspect-linux_aarch64_"]
-cmd = "inspect_artifacts --recipe-dir recipe -m .ci_support/linux_aarch64_.yaml"
-description = "List contents of ocaml-feedstock-5.4.0-altc-feedstock packages built for variant linux_aarch64_"
-[tasks."build-linux_ppc64le_"]
-cmd = "rattler-build build --recipe recipe -m .ci_support/linux_ppc64le_.yaml"
-description = "Build ocaml-feedstock-5.4.0-altc-feedstock with variant linux_ppc64le_ directly (without setup scripts)"
-[tasks."inspect-linux_ppc64le_"]
-cmd = "inspect_artifacts --recipe-dir recipe -m .ci_support/linux_ppc64le_.yaml"
-description = "List contents of ocaml-feedstock-5.4.0-altc-feedstock packages built for variant linux_ppc64le_"
-[tasks."build-osx_64_"]
-cmd = "rattler-build build --recipe recipe -m .ci_support/osx_64_.yaml"
-description = "Build ocaml-feedstock-5.4.0-altc-feedstock with variant osx_64_ directly (without setup scripts)"
-[tasks."inspect-osx_64_"]
-cmd = "inspect_artifacts --recipe-dir recipe -m .ci_support/osx_64_.yaml"
-description = "List contents of ocaml-feedstock-5.4.0-altc-feedstock packages built for variant osx_64_"
-[tasks."build-osx_arm64_"]
-cmd = "rattler-build build --recipe recipe -m .ci_support/osx_arm64_.yaml"
-description = "Build ocaml-feedstock-5.4.0-altc-feedstock with variant osx_arm64_ directly (without setup scripts)"
-[tasks."inspect-osx_arm64_"]
-cmd = "inspect_artifacts --recipe-dir recipe -m .ci_support/osx_arm64_.yaml"
-description = "List contents of ocaml-feedstock-5.4.0-altc-feedstock packages built for variant osx_arm64_"
+[tasks."build-linux_64_c_compilergcccross_target_platform_linux-64"]
+cmd = "rattler-build build --recipe recipe -m .ci_support/linux_64_c_compilergcccross_target_platform_linux-64.yaml"
+description = "Build ocaml-feedstock-5.4.0-altc-feedstock with variant linux_64_c_compilergcccross_target_platform_linux-64 directly (without setup scripts)"
+[tasks."inspect-linux_64_c_compilergcccross_target_platform_linux-64"]
+cmd = "inspect_artifacts --recipe-dir recipe -m .ci_support/linux_64_c_compilergcccross_target_platform_linux-64.yaml"
+description = "List contents of ocaml-feedstock-5.4.0-altc-feedstock packages built for variant linux_64_c_compilergcccross_target_platform_linux-64"
+[tasks."build-linux_64_c_compilergcccross_target_platform_linux-ppc64le"]
+cmd = "rattler-build build --recipe recipe -m .ci_support/linux_64_c_compilergcccross_target_platform_linux-ppc64le.yaml"
+description = "Build ocaml-feedstock-5.4.0-altc-feedstock with variant linux_64_c_compilergcccross_target_platform_linux-ppc64le directly (without setup scripts)"
+[tasks."inspect-linux_64_c_compilergcccross_target_platform_linux-ppc64le"]
+cmd = "inspect_artifacts --recipe-dir recipe -m .ci_support/linux_64_c_compilergcccross_target_platform_linux-ppc64le.yaml"
+description = "List contents of ocaml-feedstock-5.4.0-altc-feedstock packages built for variant linux_64_c_compilergcccross_target_platform_linux-ppc64le"
+[tasks."build-linux_64_c_compilergcccross_target_platform_linux-s390x"]
+cmd = "rattler-build build --recipe recipe -m .ci_support/linux_64_c_compilergcccross_target_platform_linux-s390x.yaml"
+description = "Build ocaml-feedstock-5.4.0-altc-feedstock with variant linux_64_c_compilergcccross_target_platform_linux-s390x directly (without setup scripts)"
+[tasks."inspect-linux_64_c_compilergcccross_target_platform_linux-s390x"]
+cmd = "inspect_artifacts --recipe-dir recipe -m .ci_support/linux_64_c_compilergcccross_target_platform_linux-s390x.yaml"
+description = "List contents of ocaml-feedstock-5.4.0-altc-feedstock packages built for variant linux_64_c_compilergcccross_target_platform_linux-s390x"
+[tasks."build-linux_64_c_compilerzigcross_target_platform_linux-riscv64"]
+cmd = "rattler-build build --recipe recipe -m .ci_support/linux_64_c_compilerzigcross_target_platform_linux-riscv64.yaml"
+description = "Build ocaml-feedstock-5.4.0-altc-feedstock with variant linux_64_c_compilerzigcross_target_platform_linux-riscv64 directly (without setup scripts)"
+[tasks."inspect-linux_64_c_compilerzigcross_target_platform_linux-riscv64"]
+cmd = "inspect_artifacts --recipe-dir recipe -m .ci_support/linux_64_c_compilerzigcross_target_platform_linux-riscv64.yaml"
+description = "List contents of ocaml-feedstock-5.4.0-altc-feedstock packages built for variant linux_64_c_compilerzigcross_target_platform_linux-riscv64"
+[tasks."build-linux_aarch64_c_compilergcccross_target_platform_linux-aarch64"]
+cmd = "rattler-build build --recipe recipe -m .ci_support/linux_aarch64_c_compilergcccross_target_platform_linux-aarch64.yaml"
+description = "Build ocaml-feedstock-5.4.0-altc-feedstock with variant linux_aarch64_c_compilergcccross_target_platform_linux-aarch64 directly (without setup scripts)"
+[tasks."inspect-linux_aarch64_c_compilergcccross_target_platform_linux-aarch64"]
+cmd = "inspect_artifacts --recipe-dir recipe -m .ci_support/linux_aarch64_c_compilergcccross_target_platform_linux-aarch64.yaml"
+description = "List contents of ocaml-feedstock-5.4.0-altc-feedstock packages built for variant linux_aarch64_c_compilergcccross_target_platform_linux-aarch64"
+[tasks."build-linux_ppc64le_c_compilergcccross_target_platform_linux-ppc64le"]
+cmd = "rattler-build build --recipe recipe -m .ci_support/linux_ppc64le_c_compilergcccross_target_platform_linux-ppc64le.yaml"
+description = "Build ocaml-feedstock-5.4.0-altc-feedstock with variant linux_ppc64le_c_compilergcccross_target_platform_linux-ppc64le directly (without setup scripts)"
+[tasks."inspect-linux_ppc64le_c_compilergcccross_target_platform_linux-ppc64le"]
+cmd = "inspect_artifacts --recipe-dir recipe -m .ci_support/linux_ppc64le_c_compilergcccross_target_platform_linux-ppc64le.yaml"
+description = "List contents of ocaml-feedstock-5.4.0-altc-feedstock packages built for variant linux_ppc64le_c_compilergcccross_target_platform_linux-ppc64le"
+[tasks."build-linux_riscv64_c_compilerzigcross_target_platform_linux-riscv64"]
+cmd = "rattler-build build --recipe recipe -m .ci_support/linux_riscv64_c_compilerzigcross_target_platform_linux-riscv64.yaml"
+description = "Build ocaml-feedstock-5.4.0-altc-feedstock with variant linux_riscv64_c_compilerzigcross_target_platform_linux-riscv64 directly (without setup scripts)"
+[tasks."inspect-linux_riscv64_c_compilerzigcross_target_platform_linux-riscv64"]
+cmd = "inspect_artifacts --recipe-dir recipe -m .ci_support/linux_riscv64_c_compilerzigcross_target_platform_linux-riscv64.yaml"
+description = "List contents of ocaml-feedstock-5.4.0-altc-feedstock packages built for variant linux_riscv64_c_compilerzigcross_target_platform_linux-riscv64"
+[tasks."build-linux_s390x_c_compilergcccross_target_platform_linux-s390x"]
+cmd = "rattler-build build --recipe recipe -m .ci_support/linux_s390x_c_compilergcccross_target_platform_linux-s390x.yaml"
+description = "Build ocaml-feedstock-5.4.0-altc-feedstock with variant linux_s390x_c_compilergcccross_target_platform_linux-s390x directly (without setup scripts)"
+[tasks."inspect-linux_s390x_c_compilergcccross_target_platform_linux-s390x"]
+cmd = "inspect_artifacts --recipe-dir recipe -m .ci_support/linux_s390x_c_compilergcccross_target_platform_linux-s390x.yaml"
+description = "List contents of ocaml-feedstock-5.4.0-altc-feedstock packages built for variant linux_s390x_c_compilergcccross_target_platform_linux-s390x"
+[tasks."build-osx_64_cross_target_platform_osx-64"]
+cmd = "rattler-build build --recipe recipe -m .ci_support/osx_64_cross_target_platform_osx-64.yaml"
+description = "Build ocaml-feedstock-5.4.0-altc-feedstock with variant osx_64_cross_target_platform_osx-64 directly (without setup scripts)"
+[tasks."inspect-osx_64_cross_target_platform_osx-64"]
+cmd = "inspect_artifacts --recipe-dir recipe -m .ci_support/osx_64_cross_target_platform_osx-64.yaml"
+description = "List contents of ocaml-feedstock-5.4.0-altc-feedstock packages built for variant osx_64_cross_target_platform_osx-64"
+[tasks."build-osx_arm64_cross_target_platform_osx-arm64"]
+cmd = "rattler-build build --recipe recipe -m .ci_support/osx_arm64_cross_target_platform_osx-arm64.yaml"
+description = "Build ocaml-feedstock-5.4.0-altc-feedstock with variant osx_arm64_cross_target_platform_osx-arm64 directly (without setup scripts)"
+[tasks."inspect-osx_arm64_cross_target_platform_osx-arm64"]
+cmd = "inspect_artifacts --recipe-dir recipe -m .ci_support/osx_arm64_cross_target_platform_osx-arm64.yaml"
+description = "List contents of ocaml-feedstock-5.4.0-altc-feedstock packages built for variant osx_arm64_cross_target_platform_osx-arm64"
+[tasks."build-win_64_c_compilergcccross_target_platform_win-64"]
+cmd = "rattler-build build --recipe recipe -m .ci_support/win_64_c_compilergcccross_target_platform_win-64.yaml"
+description = "Build ocaml-feedstock-5.4.0-altc-feedstock with variant win_64_c_compilergcccross_target_platform_win-64 directly (without setup scripts)"
+[tasks."inspect-win_64_c_compilergcccross_target_platform_win-64"]
+cmd = "inspect_artifacts --recipe-dir recipe -m .ci_support/win_64_c_compilergcccross_target_platform_win-64.yaml"
+description = "List contents of ocaml-feedstock-5.4.0-altc-feedstock packages built for variant win_64_c_compilergcccross_target_platform_win-64"
+[tasks."build-win_64_c_compilervs2022cross_target_platform_win-64"]
+cmd = "rattler-build build --recipe recipe -m .ci_support/win_64_c_compilervs2022cross_target_platform_win-64.yaml"
+description = "Build ocaml-feedstock-5.4.0-altc-feedstock with variant win_64_c_compilervs2022cross_target_platform_win-64 directly (without setup scripts)"
+[tasks."inspect-win_64_c_compilervs2022cross_target_platform_win-64"]
+cmd = "inspect_artifacts --recipe-dir recipe -m .ci_support/win_64_c_compilervs2022cross_target_platform_win-64.yaml"
+description = "List contents of ocaml-feedstock-5.4.0-altc-feedstock packages built for variant win_64_c_compilervs2022cross_target_platform_win-64"
+[tasks."build-win_64_c_compilervs2022cross_target_platform_win-arm64"]
+cmd = "rattler-build build --recipe recipe -m .ci_support/win_64_c_compilervs2022cross_target_platform_win-arm64.yaml"
+description = "Build ocaml-feedstock-5.4.0-altc-feedstock with variant win_64_c_compilervs2022cross_target_platform_win-arm64 directly (without setup scripts)"
+[tasks."inspect-win_64_c_compilervs2022cross_target_platform_win-arm64"]
+cmd = "inspect_artifacts --recipe-dir recipe -m .ci_support/win_64_c_compilervs2022cross_target_platform_win-arm64.yaml"
+description = "List contents of ocaml-feedstock-5.4.0-altc-feedstock packages built for variant win_64_c_compilervs2022cross_target_platform_win-arm64"
 [tasks."build-win_64_c_compilerzigcross_target_platform_win-arm64"]
 cmd = "rattler-build build --recipe recipe -m .ci_support/win_64_c_compilerzigcross_target_platform_win-arm64.yaml"
 description = "Build ocaml-feedstock-5.4.0-altc-feedstock with variant win_64_c_compilerzigcross_target_platform_win-arm64 directly (without setup scripts)"

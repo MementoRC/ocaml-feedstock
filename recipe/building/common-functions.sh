@@ -65,6 +65,14 @@ apply_cross_patches() {
     sed -i 's/^\(BYTECCLIBS=.*\)$/\1 -ldl/' Makefile.config
     sed -i 's/^\(NATIVECCLIBS=.*\)$/\1 -ldl/' Makefile.config
   fi
+
+  # Override MKDLL when libtool's BUILD-linker shared-lib test misdetects (e.g. s390x where x86_64-ld lacks elf64_s390 emulation)
+  # Without this, MKDLL=shared-libs-not-available causes Error 127 when building libcamlrun_shared.so
+  if grep -q '^MKDLL=shared-libs-not-available' Makefile.config; then
+    echo "  Patching MKDLL: configure's shared-lib detection failed; restoring \$(CC) -shared form"
+    sed -i 's|^MKDLL=shared-libs-not-available.*|MKDLL=$(CC) -shared $(OC_DLL_LDFLAGS) $(LDFLAGS)|' Makefile.config
+    sed -i 's|^SUPPORTS_SHARED_LIBRARIES=false|SUPPORTS_SHARED_LIBRARIES=true|' Makefile.config
+  fi
 }
 
 # Helper: Find tool with full path (required for macOS to avoid GNU ar)
@@ -117,6 +125,8 @@ get_target_id() {
   case "${target}" in
     aarch64-conda-linux-gnu) echo "AARCH64" ;;
     powerpc64le-conda-linux-gnu) echo "PPC64LE" ;;
+    riscv64-conda-linux-gnu) echo "RISCV64" ;;
+    s390x-conda-linux-gnu) echo "S390X" ;;
     arm64-apple-darwin*) echo "ARM64" ;;
     x86_64-conda-linux-gnu|x86_64-apple-darwin*) echo "X86_64" ;;
     *) echo "${target}" | cut -d'-' -f1 | tr '[:lower:]' '[:upper:]' ;;
@@ -131,6 +141,8 @@ get_target_arch() {
   case "${target}" in
     aarch64-*|arm64-*) echo "arm64" ;;
     powerpc64le-*) echo "power" ;;
+    riscv64-*) echo "riscv" ;;
+    s390x-*) echo "s390x" ;;
     x86_64-*|*-x86_64-*) echo "amd64" ;;
     *) echo "amd64" ;;  # default
   esac
@@ -145,9 +157,11 @@ get_target_platform() {
     aarch64-*mingw32|aarch64-*windows*) echo "win-arm64" ;;
     x86_64-*mingw32|x86_64-*windows*) echo "win-64" ;;
     aarch64-*) echo "linux-aarch64" ;;
-    arm64-*) echo "osx-arm64" ;;
     powerpc64le-*) echo "linux-ppc64le" ;;
+    riscv64-*) echo "linux-riscv64" ;;
+    s390x-*) echo "linux-s390x" ;;
     x86_64-conda-linux-gnu) echo "linux-64" ;;
+    arm64-*) echo "osx-arm64" ;;
     x86_64-apple-darwin*) echo "osx-64" ;;
     *) echo "amd64" ;;  # default
   esac
@@ -367,19 +381,30 @@ setup_cflags_ldflags() {
       export "${name}_CFLAGS="
       export "${name}_LDFLAGS="
       ;;
-    NATIVE_osx-64_osx-64|NATIVE_linux-64_linux-64|NATIVE_nonunix-64_nonunix-64)
+    NATIVE_linux-aarch64_linux-aarch64|NATIVE_osx-arm64_osx-arm64|NATIVE_osx-64_osx-64|NATIVE_linux-64_linux-64|NATIVE_nonunix-64_nonunix-64)
       # Native build: use environment CFLAGS (set by conda-build for this platform)
       export "${name}_CFLAGS=${CFLAGS:-}"
       export "${name}_LDFLAGS=${LDFLAGS:-}"
       ;;
-    CROSS_linux-64_linux-aarch64|CROSS_linux-64_linux-ppc64le)
-      # Cross-compiling FOR Linux aarch64/ppc64le
+    CROSS_linux-64_linux-aarch64|CROSS_linux-64_linux-ppc64le|CROSS_linux-64_linux-riscv64)
+      # Cross-compiling FOR Linux aarch64/ppc64le/riscv64
       # ALWAYS use clean generic flags - conda-build's CFLAGS is often corrupted with
       # mixed build/target flags that cause -march=nocona on aarch64 cross-compiler
       export "${name}_CFLAGS=-ftree-vectorize -fPIC -fstack-protector-strong -O2 -pipe -isystem ${PREFIX}/include"
       export "${name}_LDFLAGS=-Wl,-O2 -Wl,--as-needed -Wl,-z,relro -Wl,-z,now -L${PREFIX}/lib"
       ;;
-    CROSS_osx-64_osx-arm64)
+    CROSS_linux-64_linux-s390x)
+      # Cross-compiling FOR Linux s390x
+      # s390x: reverted to -march=z13 for bisecting against v7 working state
+      # (was -march=z196; reverting to confirm z13 is the passing baseline)
+      # Use -fno-plt to emit GOT-indirect calls for libc (avoids _dl_runtime_resolve_vx
+      # PLT trampoline corrupting OCaml's fiber heap stack — complements upstream PR #14547
+      # which covers OCaml-generated runtime calls; this covers the C-side gap).
+      export "${name}_CFLAGS=-ftree-vectorize -fPIC -fstack-protector-strong -O2 -pipe -march=z13 -mzarch -fno-plt -isystem ${PREFIX}/include"
+      export "${name}_LDFLAGS=-Wl,-O2 -Wl,--as-needed -Wl,-z,relro -Wl,-z,now -L${PREFIX}/lib"
+      export "${name}_ASPPFLAGS=-march=z13 -mzarch -fno-plt"
+      ;;
+    CROSS_osx-64_osx-arm64|CROSS_osx-arm64_osx-64)
       # Cross-compiling FOR macOS ARM64 (on osx-64)
       # ALWAYS use clean generic flags - conda-build's CFLAGS is often corrupted
       # CRITICAL: Both CFLAGS and LDFLAGS need -isysroot for the ARM64 SDK!
@@ -395,7 +420,7 @@ setup_cflags_ldflags() {
       export "${name}_CFLAGS=-march=core2 -mtune=haswell -mssse3 -ftree-vectorize -fPIC -fstack-protector-strong -O2 -pipe -isystem ${BUILD_PREFIX}/include"
       export "${name}_LDFLAGS=-fuse-ld=lld -L${BUILD_PREFIX}/lib -Wl,-headerpad_max_install_names -Wl,-dead_strip_dylibs"
       ;;
-    NATIVE_linux-64_linux-aarch64|NATIVE_linux-64_linux-ppc64le)
+    NATIVE_linux-64_linux-aarch64|NATIVE_linux-64_linux-ppc64le|NATIVE_linux-64_linux-riscv64|NATIVE_linux-64_linux-s390x)
       # Native OCaml build during cross-platform CI (runs on x86_64 BUILD machine)
       export "${name}_CFLAGS=-march=nocona -mtune=haswell -ftree-vectorize -fPIC -fstack-protector-strong -fno-plt -O2 -ffunction-sections -pipe -isystem ${BUILD_PREFIX}/include"
       export "${name}_LDFLAGS=-Wl,-O2 -Wl,--sort-common -Wl,--as-needed -Wl,-z,relro -Wl,-z,now -Wl,--disable-new-dtags -Wl,--gc-sections -Wl,-rpath,${BUILD_PREFIX}/lib -Wl,-rpath-link,${BUILD_PREFIX}/lib -L${BUILD_PREFIX}/lib"
@@ -408,6 +433,19 @@ setup_cflags_ldflags() {
       exit 1
       ;;
   esac
+
+  # Strip GCC-specific linker flags that zig's lld rejects.
+  # -Wl,-rpath-link is a GNU ld / binutils extension; zig's lld does not support it.
+  # Run unconditionally when ZIG is in use; -Wl,-rpath and -L on the same path
+  # already cover both link-time discovery and runtime lookup.
+  if [[ -n "${ZIG:-}" ]]; then
+    local _ldflags_var="${name}_LDFLAGS"
+    if [[ -n "${!_ldflags_var:-}" ]]; then
+      printf -v "${_ldflags_var}" '%s' \
+        "$(echo "${!_ldflags_var}" | sed -E 's/[[:space:]]*-Wl,-rpath-link,[^[:space:]]+//g')"
+      export "${_ldflags_var}"
+    fi
+  fi
 }
 
 # ==============================================================================
@@ -453,25 +491,60 @@ setup_toolchain() {
        fi
       ;;
     *-linux-*)
-       _AR=$(find_tool "${target}-ar" true)
-       _AS=$(find_tool "${target}-as" true)
-       _CC=$(find_tool "${target}-gcc" true)
-       _LD=$(find_tool "${target}-ld" true)
-       _NM=$(find_tool "${target}-nm" true)
-       _RANLIB=$(find_tool "${target}-ranlib" true)
-       _STRIP=$(find_tool "${target}-strip" true)
-
-       _ASM=$(basename "${_AS}")
-  
-       _MKDLL="$(basename "${_CC}") -shared"
-       # -Wl,-E exports symbols for dlopen (required by ocamlnat)
-       # -ldl required on glibc 2.17 (conda-forge sysroot) for dlopen/dlclose/dlsym
-       _MKEXE="$(basename "${_CC}") -Wl,-E -ldl"
+       if [[ -n "${ZIG:-}" ]] || command -v "${ZIG:-}" >/dev/null 2>&1; then
+         echo "  Using Zig cross-compilation for ${target} (native zig + -target)"
+         _zig_target="${target%%-conda-linux-gnu*}-linux-gnu"
+         _native_zig=$(echo "${ZIG}")
+         # ZIG_AR may be set by conda's zig activation to a triplet-prefixed wrapper
+         # (e.g. riscv64-conda-linux-gnu-zig-ar) that only exists for standard arches.
+         # Validate it is an actual executable; if not, use 'zig ar' subcommand instead.
+         if [[ -n "${ZIG_AR:-}" ]] && command -v "${ZIG_AR}" >/dev/null 2>&1; then
+           _AR="${ZIG_AR}"
+           _RANLIB="${ZIG_AR/zig-ar/zig-ranlib}"
+         else
+           _AR="${_native_zig} ar"
+           _RANLIB="${_native_zig} ranlib"
+         fi
+         _AS="${_native_zig} cc -target ${_zig_target}"
+         _CC="${_native_zig} cc -target ${_zig_target}"
+         _LD="${_native_zig} cc -target ${_zig_target}"
+         _NM="${_native_zig} nm"
+         _STRIP="echo strip-skipped"
+         
+         _ASM="$(basename "${_native_zig}") cc -target ${_zig_target} -c"
+         _MKDLL="$(basename "${_native_zig}") cc -target ${_zig_target} -shared"
+         # -Wl,-E exports symbols for dlopen (required by ocamlnat)
+         # -ldl required on glibc 2.17 (conda-forge sysroot) for dlopen/dlclose/dlsym
+         _MKEXE="$(basename "${_native_zig}") cc -target ${_zig_target} -Wl,-E -ldl"
+         # unset CFLAGS CXXFLAGS LDFLAGS CPPFLAGS 2>/dev/null || true
+         # Ensure zig wrapper dir is on PATH so bare-name execs (e.g., riscv64-conda-linux-gnu-zig-ar
+         # called from conda-ocaml-ar) resolve. Conda's zig package activate.d exports ZIG_AR/ZIG_CC
+         # env vars but does NOT add this dir to PATH. The build.sh:4962 transient prepend only covers
+         # the crossopt make subprocess; this persistent prepend covers all build phases.
+         if [[ -d "${BUILD_PREFIX:-}/share/zig/wrappers" ]] && [[ ":${PATH}:" != *":${BUILD_PREFIX}/share/zig/wrappers:"* ]]; then
+           export PATH="${BUILD_PREFIX}/share/zig/wrappers:${PATH}"
+         fi
+       else
+         _AR=$(find_tool "${target}-ar" true)
+         _AS=$(find_tool "${target}-as" true)
+         _CC=$(find_tool "${target}-gcc" true)
+         _LD=$(find_tool "${target}-ld" true)
+         _NM=$(find_tool "${target}-nm" true)
+         _RANLIB=$(find_tool "${target}-ranlib" true)
+         _STRIP=$(find_tool "${target}-strip" true)
+         
+         _ASM=$(basename "${_AS}")
+         _MKDLL="$(basename "${_CC}") -shared"
+         # -Wl,-E exports symbols for dlopen (required by ocamlnat)
+         # -ldl required on glibc 2.17 (conda-forge sysroot) for dlopen/dlclose/dlsym
+         _MKEXE="$(basename "${_CC}") -Wl,-E -ldl"
+       fi
       ;;
     *-mingw32)
        # GCC in conda prefix first, then zig as fallback
        # find_tool only searches BUILD_PREFIX/PREFIX (not system PATH)
-       if [[ -n "${ZIG:-}" ]] || command -v "${ZIG}" >/dev/null 2>&1; then
+       # v05_03CD: guard ZIG for non-zig variants (win_64-gcc, win_64-vs2022)
+       if [[ -n "${ZIG:-}" ]] || command -v "${ZIG:-}" >/dev/null 2>&1; then
          echo "  Using Zig cross-compilation for ${target} (native zig + -target)"
          local _native_zig
          case "${target}" in
@@ -669,11 +742,22 @@ clean_makefile_config() {
     "host_env" "build_env" "_build_env" "feedstock"
   )
 
-  # Remove -L and -Wl,-L paths containing build directories
-  sed -i 's|-L/[^ ]*/lib ||g' "${config_file}"
+  # v05_03CE: Strip ALL -L absolute paths (more aggressive than requiring /lib suffix).
+  # Some Makefile.config vars (e.g., bytecomp_c_libraries) carry -L<host_prefix>/lib
+  # but the previous '-L[^ ]*/lib ' pattern proved insufficient on osx-arm64 native.
+  # OCaml runtime never needs build-time -L paths; they are link-time only.
+  sed -i 's|-L/[^ ]* ||g' "${config_file}"     # any -L/path followed by space
+  sed -i 's|-L/[^ ]*$||g' "${config_file}"     # any -L/path at end of line
   sed -i 's|-Wl,-L[^ ]* ||g' "${config_file}"
+  sed -i 's|-Wl,-L[^ ]*$||g' "${config_file}"
   for marker in "${markers[@]}"; do
     sed -i "s|-L[^ ]*${marker}[^ ]* ||g" "${config_file}"
+  done
+
+  # v05_03CE: Defensive scrub for known link-line vars that carry stale -L paths
+  # even after generic stripping (e.g., when configure embeds them as separate vars).
+  for var in bytecomp_c_libraries asmcomp_c_libraries native_c_libraries c_libraries; do
+    sed -i "s|^\\(${var}=\\).*\\(-l[^ ]*\\)|\\1\\2|" "${config_file}" 2>/dev/null || true
   done
 
   # CRITICAL: Remove CONFIGURE_ARGS - it contains build-time paths
@@ -962,8 +1046,13 @@ transfer_to_prefix() {
     _bk_dst="$(cygpath -u "${dest_dir}")"
   fi
   mkdir -p "${_bk_dst}"
-  # v05_03BM: --dereference converts symlinks to regular file copies (Windows tar limitation).
-  tar -C "${_bk_src}" --dereference -cf - . | tar -C "${_bk_dst}" -xf -
+  # v05_03BM/BU: --dereference only on Windows (MSYS2 tar can't recreate symlinks).
+  # Unix builds keep symlinks - preserving original/correct packaging behavior.
+  local _bu_tar_extra=""
+  if command -v cygpath >/dev/null 2>&1; then
+    _bu_tar_extra="--dereference"
+  fi
+  tar -C "${_bk_src}" ${_bu_tar_extra} -cf - . | tar -C "${_bk_dst}" -xf -
 
   local config_file="${dest_dir}/lib/ocaml/Makefile.config"
   sed -i "s#${src_dir}#${dest_dir}#g" "${config_file}"

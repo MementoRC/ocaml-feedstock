@@ -1,5 +1,5 @@
 c_compiler:
-- zig
+- gcc
 c_compiler_version:
 - 19
 c_stdlib:
@@ -11,7 +11,7 @@ channel_sources:
 channel_targets:
 - conda-forge main
 cross_target_platform_:
-- win-arm64
+- win-64
 m2w64_c_compiler:
 - gcc
 m2w64_c_compiler_version:

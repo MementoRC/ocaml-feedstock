@@ -4,6 +4,24 @@
 
 set -euo pipefail
 
+# Detect cross-target sysroot via filesystem (target_platform env var is not reliable in rattler-build test phase).
+# If a sysroot for a cross-arch is installed in the test env, point QEMU_LD_PREFIX at it so binfmt_misc/qemu can
+# resolve the target's /lib/ld64.so.1 dynamic linker.
+unset QEMU_LD_PREFIX QEMU_CPU
+for _triplet in s390x-conda-linux-gnu riscv64-conda-linux-gnu aarch64-conda-linux-gnu powerpc64le-conda-linux-gnu; do
+    if [ -d "${PREFIX}/${_triplet}/sysroot/lib" ]; then
+        export QEMU_LD_PREFIX="${PREFIX}/${_triplet}/sysroot"
+        case "${_triplet}" in
+            s390x-conda-linux-gnu) export QEMU_CPU="max" ;;
+            powerpc64le-conda-linux-gnu) export QEMU_CPU="power8" ;;
+            *) export QEMU_CPU="max" ;;
+        esac
+        echo "[qemu-cross-exec] QEMU_LD_PREFIX=${QEMU_LD_PREFIX} QEMU_CPU=${QEMU_CPU} (auto-detected via filesystem)"
+        break
+    fi
+done
+unset _triplet
+
 VERSION="${1:-}"
 if [[ -z "$VERSION" ]]; then
   echo "Usage: $0 <version>"

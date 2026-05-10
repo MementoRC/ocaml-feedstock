@@ -105,7 +105,7 @@ fi
 echo ""
 echo "============================================================"
 echo "OCaml Build Script - Mode Detection"
-echo "  BUILD_SCRIPT_VERSION: 2026-05-09u-v05_03BT-disable-output-validation"
+echo "  BUILD_SCRIPT_VERSION: 2026-05-14n-riscv64-exclude-binutils_impl-test-dep"
 echo "============================================================"
 echo "  OCAML_TARGET_PLATFORM:         ${OCAML_TARGET_PLATFORM:-<not set>}"
 echo "  OCAML_TARGET_TRIPLET:          ${OCAML_TARGET_TRIPLET:-<not set>}"
@@ -529,7 +529,13 @@ build_native() {
   fi
 
   # Clean up Makefile.config - remove embedded paths that cause issues
+  echo "=== DIAG CI checkpoint 1 (post-configure, pre-strip): BYTECCLIBS line ==="
+  grep '^BYTECCLIBS=' Makefile.config 2>/dev/null || echo "(no Makefile.config / no BYTECCLIBS line)"
+
   patch_makefile_config_post_configure
+
+  echo "=== DIAG CI checkpoint 2 (post-strip): BYTECCLIBS line ==="
+  grep '^BYTECCLIBS=' Makefile.config 2>/dev/null || echo "(no Makefile.config / no BYTECCLIBS line)"
 
   if [[ "${target_platform}" == "osx"* ]]; then
     # For cross-compilation, use BUILD_PREFIX (has x86_64 libs for native compiler)
@@ -556,6 +562,19 @@ build_native() {
     # Use @loader_path for relocatable rpath (survives conda relocation)
     # Note: Don't use -L${PREFIX}/lib here - conda-ocaml-mkexe wrapper adds it at runtime
     sed -i "s|^BYTECCLIBS=\(.*\)|BYTECCLIBS=\1 -Wl,-rpath,@loader_path/../lib -lzstd|" "${config_file}"
+    echo "=== DIAG CI checkpoint 3 (post-osx-BYTECCLIBS-sed, pre-make): BYTECCLIBS line ==="
+    grep '^BYTECCLIBS=' "${config_file}" 2>/dev/null || echo "(no BYTECCLIBS line)"
+
+    # v05_03CK: OCaml 5.4 configure writes utils/config.generated.ml via autoconf
+    # with various *_c_libraries substitutions (NOT utils/config.ml as v05_03CJ
+    # assumed). Tools like ocamlc.opt embed *_c_libraries from this file. The
+    # config uses OCaml's {|...|} multi-line string syntax, so the regex
+    # excludes both space AND `|` to avoid matching across the string boundary.
+    if [[ -f utils/config.generated.ml ]]; then
+      sed -i '/^let .*_c_libraries/s|-L[^ |]* *||g' utils/config.generated.ml
+      echo "=== DIAG CK checkpoint 4 (post-config.generated.ml strip): bytecomp_c_libraries line ==="
+      grep 'bytecomp_c_libraries' utils/config.generated.ml | head -1 || echo "(no bytecomp_c_libraries line)"
+    fi
   elif [[ "${target_platform}" != "linux"* ]] && [[ "${OCAML_TARGET_TRIPLET}" != *"-pc-"* ]]; then
     local config_file="Makefile.config"
 
@@ -882,13 +901,35 @@ GCCBAT
     # The bytecode runtime shared library (libcamlrun_shared.so) needs to link
     # against target-arch zstd. Create a conda env with target-platform zstd.
     TARGET_ZSTD_ENV="zstd_${CROSS_PLATFORM}"
-    echo "  Installing target-arch zstd for ${CROSS_PLATFORM}..."
-    conda create -n "${TARGET_ZSTD_ENV}" --platform "${CROSS_PLATFORM}" -y zstd --quiet 2>&1 | grep -v "^INFO:" || true
-    # Get env path from conda info (envs are in $CONDA_PREFIX/envs/ or default location)
-    CONDA_ENVS_DIR=$(conda info --json 2>/dev/null | python -c "import sys,json; print(json.load(sys.stdin)['envs_dirs'][0])")
-    TARGET_ZSTD_LIB="${CONDA_ENVS_DIR}/${TARGET_ZSTD_ENV}/lib"
-    TARGET_ZSTD_LIBS="-L${TARGET_ZSTD_LIB} -lzstd"
-    echo "  TARGET_ZSTD_LIBS: ${TARGET_ZSTD_LIBS}"
+    # Fast-path: known minority arches lack zstd on conda-forge; skip the slow conda create probe
+    TARGET_ZSTD_AVAILABLE="${TARGET_ZSTD_AVAILABLE:-1}"
+    case "${CROSS_PLATFORM}" in
+      linux-s390x|linux-riscv64)
+        TARGET_ZSTD_AVAILABLE=0
+        echo "  [zstd-fast-path] ${CROSS_PLATFORM}: known to lack zstd; setting TARGET_ZSTD_AVAILABLE=0"
+        ;;
+    esac
+    if [ "${TARGET_ZSTD_AVAILABLE}" = "1" ]; then
+      echo "  Installing target-arch zstd for ${CROSS_PLATFORM}..."
+      conda create -n "${TARGET_ZSTD_ENV}" --platform "${CROSS_PLATFORM}" -y zstd --quiet 2>&1 | grep -v "^INFO:" || true
+      # Get env path from conda info (envs are in $CONDA_PREFIX/envs/ or default location)
+      CONDA_ENVS_DIR=$(conda info --json 2>/dev/null | python -c "import sys,json; print(json.load(sys.stdin)['envs_dirs'][0])")
+      TARGET_ZSTD_LIB="${CONDA_ENVS_DIR}/${TARGET_ZSTD_ENV}/lib"
+      # v05_03CR: only export TARGET_ZSTD_LIBS if the conda create succeeded (lib dir exists with libzstd).
+      # For platforms where conda-forge doesn't ship zstd (e.g. linux-riscv64), set empty + flag to drop -lzstd.
+      if [[ -f "${TARGET_ZSTD_LIB}/libzstd.so" || -f "${TARGET_ZSTD_LIB}/libzstd.a" ]]; then
+        TARGET_ZSTD_LIBS="-L${TARGET_ZSTD_LIB} -lzstd"
+        TARGET_ZSTD_AVAILABLE=1
+        echo "  TARGET_ZSTD_LIBS: ${TARGET_ZSTD_LIBS}"
+      else
+        TARGET_ZSTD_LIBS=""
+        TARGET_ZSTD_AVAILABLE=0
+        echo "  TARGET_ZSTD_LIBS: <empty> (conda-forge ${CROSS_PLATFORM} has no zstd; will configure --without-zstd)"
+      fi
+    else
+      TARGET_ZSTD_LIBS=""
+      echo "  TARGET_ZSTD_LIBS: <empty> (fast-path: ${CROSS_PLATFORM} known to lack zstd)"
+    fi
 
     # ========================================================================
     # Clean and configure
@@ -904,6 +945,10 @@ GCCBAT
     # CRITICAL: Override CFLAGS/LDFLAGS - conda-build sets them for TARGET (ppc64le)
     # but configure needs BUILD flags (x86_64) to compile the cross-compiler binary
     # NOTE: OCaml 5.4.0+ requires CFLAGS/LDFLAGS as env vars, not configure args.
+    # zig's lld rejects -Wl,-rpath-link (conda-build injects it in NATIVE_LDFLAGS
+    # for linux build hosts). Strip it; -Wl,-rpath and -L on the same path cover
+    # both link-time discovery and runtime lookup.
+    NATIVE_LDFLAGS=$(echo "${NATIVE_LDFLAGS}" | sed -E 's/-Wl,-rpath-link,[^ ]+ ?//g')
     export CC="${NATIVE_CC}"
     export CFLAGS="${NATIVE_CFLAGS}"
     export LDFLAGS="${NATIVE_LDFLAGS}"
@@ -921,6 +966,12 @@ GCCBAT
       esac
     fi
 
+    # v05_03CR: skip zstd compression in cross-target runtime if target zstd unavailable
+    declare -a TARGET_ZSTD_CONFIG_ARGS=()
+    if [[ "${TARGET_ZSTD_AVAILABLE:-1}" == "0" ]]; then
+      TARGET_ZSTD_CONFIG_ARGS+=(--without-zstd)
+    fi
+
     run_logged "cross-configure" ${CONFIGURE[@]} \
       -prefix="${OCAML_CROSS_PREFIX}" \
       --mandir="${OCAML_CROSS_PREFIX}"/share/man \
@@ -928,6 +979,7 @@ GCCBAT
       --target="${target}" \
       "${CONFIG_ARGS[@]}" \
       "${TARGET_CONFIG_ARGS[@]}" \
+      "${TARGET_ZSTD_CONFIG_ARGS[@]}" \
       AR="${CROSS_AR}" \
       AS="${NATIVE_AS}" \
       LD="${NATIVE_LD}" \
@@ -4515,7 +4567,7 @@ T24_SYMTBL_STUB_C
     # conflicts with x64 machine type. By future-touching these binaries here, make
     # considers them up-to-date and skips the re-link inside crossopt.
     # T31 already produced these via flexlink (non-functional but linked OK for adoption).
-    if ! is_unix; then
+    if [[ "${OCAML_TARGET_PLATFORM:-}" = "win-arm64" ]]; then
       echo "v05_03m: pre-touch runtime binaries to year 2099 to prevent crossopt re-link"
       for _v05_03m_target in runtime/ocamlrun.exe runtime/ocamlrund.exe runtime/ocamlruns.exe; do
         if [[ -f "${SRC_DIR}/${_v05_03m_target}" ]]; then
@@ -4631,7 +4683,7 @@ CROSS_WINMAIN_STUB_C
       ARCH="${CROSS_ARCH}"
       AR="${CROSS_AR}"
       AS="${CROSS_AS}"
-      ASPP="${CROSS_CC} -c"
+      ASPP="${CROSS_CC} -c ${CROSS_ASPPFLAGS:-}"
       CC="${CROSS_CC}"
       CFLAGS="${CROSS_CFLAGS}"
       CROSS_AR="${CROSS_AR}"
@@ -4719,6 +4771,13 @@ CROSS_WINMAIN_STUB_C
         echo "v05_03AE: SKIP_COMPRMARSH_BUILD=true (win-arm64 only)"
       fi
 
+      # Ensure -march=z13 -mzarch reaches OCaml's runtime/Makefile when assembling .S files.
+      # OCaml uses $(ASPPFLAGS) for .S compilation; export the cross variant under the canonical name.
+      if [ -n "${CROSS_ASPPFLAGS:-}" ]; then
+          export ASPPFLAGS="${CROSS_ASPPFLAGS}"
+          echo "[s390x-asm-fix] Exported ASPPFLAGS=${ASPPFLAGS} for make crossopt"
+      fi
+
       # --- Build crossopt ---
       CROSSOPT_ARGS=(
         "${CROSS_TOOLCHAIN_ARGS[@]}"
@@ -4732,7 +4791,7 @@ CROSS_WINMAIN_STUB_C
         SAK_CC="${SAK_CC_GNU:-${NATIVE_CC}}"
         SAK_CFLAGS="${NATIVE_CFLAGS}"
         SAK_LDFLAGS="${NATIVE_LDFLAGS}"
-        SAK_BYTECCLIBS="${_native_bytecclibs}"
+        SAK_BYTECCLIBS="${_native_bytecclibs:-}"
 
         # CRITICAL: Do NOT pass MKEXE as a command-line override to `make crossopt` --
         # cross-flexdll's sub-make inherits it via MAKEOVERRIDES, expands $(MKEXE) -exe ... and zig-cc rejects -exe.
@@ -4773,71 +4832,63 @@ CROSS_WINMAIN_STUB_C
       # MKEXE override is now handled inside Makefile.cross crossopt recipe
       # (sed on Makefile.config, restored at end of crossopt target)
 
-      # v05_03h DIAGNOSTIC: identify which flexlink binary is in PATH before crossopt
-      echo "============ v05_03h DIAGNOSTIC: pre-crossopt flexlink check ============"
-      echo "  which flexlink: $(which flexlink 2>&1 || echo NOT_FOUND)"
-      echo "  which flexlink.exe: $(which flexlink.exe 2>&1 || echo NOT_FOUND)"
-      echo "  BUILD_PREFIX flexlink:"
-      ls -la "${BUILD_PREFIX}/Library/bin/flexlink"* 2>/dev/null || echo "  (none)"
-      echo "  SRC_DIR flexlink instances:"
-      find "${SRC_DIR}" -name 'flexlink*' -maxdepth 5 -ls 2>/dev/null || true
-      echo "  flexlink -help (first 10 lines):"
-      flexlink -help 2>&1 | head -10 || echo "  flexlink -help failed"
-      find "${SRC_DIR}" -name 'flexlink*' -maxdepth 5 -type f 2>/dev/null \
-        > "${LOG_DIR}/v05_03h_pre_crossopt_flexlinks.txt" || true
-      echo "  (saved flexlink list to ${LOG_DIR}/v05_03h_pre_crossopt_flexlinks.txt)"
-      echo "============ v05_03h DIAGNOSTIC: end pre-crossopt check ============"
+      # v05_03h DIAGNOSTIC removed in BU (probe no longer needed)
 
-      # v05_03l: physical replacement of bytecode flexlink with conda stock
-      # The bytecode flexlink at byte/bin/flexlink.exe (built in Phase A) shadows the
-      # conda stock flexlink in PATH and rejects -exe at runtime. Replace it directly.
-      _v05_03l_stock="${BUILD_PREFIX}/Library/bin/flexlink.exe"
-      _v05_03l_target="${SRC_DIR}/byte/bin/flexlink.exe"
-      if [[ -x "${_v05_03l_stock}" ]]; then
-        if [[ -f "${_v05_03l_target}" ]]; then
-          cp "${_v05_03l_target}" "${_v05_03l_target}.bytecode-backup"
-          echo "v05_03l: backed up bytecode flexlink to ${_v05_03l_target}.bytecode-backup"
+      if [[ "${OCAML_TARGET_PLATFORM:-}" = "win-arm64" ]]; then
+        # v05_03l: physical replacement of bytecode flexlink with conda stock
+        # The bytecode flexlink at byte/bin/flexlink.exe (built in Phase A) shadows the
+        # conda stock flexlink in PATH and rejects -exe at runtime. Replace it directly.
+        _v05_03l_stock="${BUILD_PREFIX}/Library/bin/flexlink.exe"
+        _v05_03l_target="${SRC_DIR}/byte/bin/flexlink.exe"
+        if [[ -x "${_v05_03l_stock}" ]]; then
+          if [[ -f "${_v05_03l_target}" ]]; then
+            cp "${_v05_03l_target}" "${_v05_03l_target}.bytecode-backup"
+            echo "v05_03l: backed up bytecode flexlink to ${_v05_03l_target}.bytecode-backup"
+          fi
+          cp "${_v05_03l_stock}" "${_v05_03l_target}"
+          echo "v05_03l: replaced ${_v05_03l_target} with conda stock ($(stat -c%s "${_v05_03l_target}" 2>/dev/null || echo ?) bytes)"
+        else
+          echo "v05_03l: WARNING conda stock flexlink not at ${_v05_03l_stock}"
         fi
-        cp "${_v05_03l_stock}" "${_v05_03l_target}"
-        echo "v05_03l: replaced ${_v05_03l_target} with conda stock ($(stat -c%s "${_v05_03l_target}" 2>/dev/null || echo ?) bytes)"
-      else
-        echo "v05_03l: WARNING conda stock flexlink not at ${_v05_03l_stock}"
+
+        # Also replace flexdll/flexlink.exe just in case
+        _v05_03l_target2="${SRC_DIR}/flexdll/flexlink.exe"
+        if [[ -x "${_v05_03l_stock}" && -f "${_v05_03l_target2}" ]]; then
+          cp "${_v05_03l_target2}" "${_v05_03l_target2}.bytecode-backup" 2>/dev/null || true
+          cp "${_v05_03l_stock}" "${_v05_03l_target2}"
+          echo "v05_03l: replaced ${_v05_03l_target2} with conda stock"
+        fi
       fi
 
-      # Also replace flexdll/flexlink.exe just in case
-      _v05_03l_target2="${SRC_DIR}/flexdll/flexlink.exe"
-      if [[ -x "${_v05_03l_stock}" && -f "${_v05_03l_target2}" ]]; then
-        cp "${_v05_03l_target2}" "${_v05_03l_target2}.bytecode-backup" 2>/dev/null || true
-        cp "${_v05_03l_stock}" "${_v05_03l_target2}"
-        echo "v05_03l: replaced ${_v05_03l_target2} with conda stock"
+      # v05_03CQ: flexlink is Windows-only (COFF/MSVC bridge). Probe and OCAML_FLEXLINK export skipped on Linux/macOS where standard ld handles linking.
+      if ! is_unix; then
+        # v05_03j: Unconditional diagnostic probe - always runs, tells us BUILD_PREFIX scope + flexlink location
+        echo "v05_03j: REACHED-OCAML_FLEXLINK-block (unconditional probe)"
+        echo "v05_03j: BUILD_PREFIX=${BUILD_PREFIX:-NOT-SET}"
+        echo "v05_03j: ls BUILD_PREFIX/Library/bin/flexlink*:"
+        ls -la "${BUILD_PREFIX}/Library/bin/flexlink"* 2>&1 || echo "v05_03j: ls FAILED"
+        echo "v05_03j: which flexlink: $(command -v flexlink 2>&1 || echo not-found)"
+
+        # v05_03i: Override OCAML_FLEXLINK to bypass bytecode flexlink in byte/bin (which fails -exe at runtime).
+        # v05_03h diagnostic confirmed: byte/bin precedes BUILD_PREFIX/Library/bin in PATH, so PATH lookup
+        # resolves to our 477KB Phase A bytecode flexlink. ocamlopt's link phase needs the conda stock 4.4MB
+        # native flexlink. OCAML_FLEXLINK is the official OCaml override env var that bypasses PATH lookup.
+        if [[ -x "${BUILD_PREFIX}/Library/bin/flexlink.exe" ]]; then
+          export OCAML_FLEXLINK="${BUILD_PREFIX}/Library/bin/flexlink.exe"
+          echo "v05_03i: OCAML_FLEXLINK=${OCAML_FLEXLINK}"
+        elif [[ -x "${BUILD_PREFIX}/Library/bin/flexlink" ]]; then
+          export OCAML_FLEXLINK="${BUILD_PREFIX}/Library/bin/flexlink"
+          echo "v05_03i: OCAML_FLEXLINK=${OCAML_FLEXLINK}"
+        else
+          echo "v05_03i: WARNING: conda stock flexlink not found at expected paths"
+        fi
+
+        # v05_03j: belt+suspenders — env-prefix OCAML_FLEXLINK to guarantee propagation
+        # even if export above didn't fire (e.g. if BUILD_PREFIX scope issue)
+        _v05_03j_flexlink="${BUILD_PREFIX}/Library/bin/flexlink.exe"
+        [[ ! -x "${_v05_03j_flexlink}" ]] && _v05_03j_flexlink="${BUILD_PREFIX}/Library/bin/flexlink"
+        echo "v05_03j: env-prefix OCAML_FLEXLINK=${_v05_03j_flexlink}"
       fi
-
-      # v05_03j: Unconditional diagnostic probe - always runs, tells us BUILD_PREFIX scope + flexlink location
-      echo "v05_03j: REACHED-OCAML_FLEXLINK-block (unconditional probe)"
-      echo "v05_03j: BUILD_PREFIX=${BUILD_PREFIX:-NOT-SET}"
-      echo "v05_03j: ls BUILD_PREFIX/Library/bin/flexlink*:"
-      ls -la "${BUILD_PREFIX}/Library/bin/flexlink"* 2>&1 || echo "v05_03j: ls FAILED"
-      echo "v05_03j: which flexlink: $(command -v flexlink 2>&1 || echo not-found)"
-
-      # v05_03i: Override OCAML_FLEXLINK to bypass bytecode flexlink in byte/bin (which fails -exe at runtime).
-      # v05_03h diagnostic confirmed: byte/bin precedes BUILD_PREFIX/Library/bin in PATH, so PATH lookup
-      # resolves to our 477KB Phase A bytecode flexlink. ocamlopt's link phase needs the conda stock 4.4MB
-      # native flexlink. OCAML_FLEXLINK is the official OCaml override env var that bypasses PATH lookup.
-      if [[ -x "${BUILD_PREFIX}/Library/bin/flexlink.exe" ]]; then
-        export OCAML_FLEXLINK="${BUILD_PREFIX}/Library/bin/flexlink.exe"
-        echo "v05_03i: OCAML_FLEXLINK=${OCAML_FLEXLINK}"
-      elif [[ -x "${BUILD_PREFIX}/Library/bin/flexlink" ]]; then
-        export OCAML_FLEXLINK="${BUILD_PREFIX}/Library/bin/flexlink"
-        echo "v05_03i: OCAML_FLEXLINK=${OCAML_FLEXLINK}"
-      else
-        echo "v05_03i: WARNING: conda stock flexlink not found at expected paths"
-      fi
-
-      # v05_03j: belt+suspenders — env-prefix OCAML_FLEXLINK to guarantee propagation
-      # even if export above didn't fire (e.g. if BUILD_PREFIX scope issue)
-      _v05_03j_flexlink="${BUILD_PREFIX}/Library/bin/flexlink.exe"
-      [[ ! -x "${_v05_03j_flexlink}" ]] && _v05_03j_flexlink="${BUILD_PREFIX}/Library/bin/flexlink"
-      echo "v05_03j: env-prefix OCAML_FLEXLINK=${_v05_03j_flexlink}"
 
       # v05_03AS: create aarch64-w64-mingw32-ocaml-as wrapper using zig
       # OCaml's ocamlopt invokes this binary to assemble .s files for win-arm64.
@@ -4902,7 +4953,16 @@ ARSHEOF
         _v05_03AS_dir=""
       fi
 
-      run_logged "crossopt" env "PATH=${_v05_03AS_dir}${_v05_03AS_dir:+:}${BUILD_PREFIX}/Library/bin:${PATH}" "OCAML_FLEXLINK=${_v05_03j_flexlink}" "${MAKE[@]}" crossopt "${CROSSOPT_ARGS[@]}" -j"${CPU_COUNT}"
+      if ! is_unix; then
+        # Windows: env-prefix with v05_03AS wrapper dir, conda Library/bin, and OCAML_FLEXLINK override
+        run_logged "crossopt" env "PATH=${_v05_03AS_dir}${_v05_03AS_dir:+:}${BUILD_PREFIX}/Library/bin:${PATH}" "OCAML_FLEXLINK=${_v05_03j_flexlink}" "${MAKE[@]}" crossopt "${CROSSOPT_ARGS[@]}" -j"${CPU_COUNT}"
+      else
+        # Linux/macOS: prepend zig wrappers dir to PATH so ${target}-ocaml-* wrapper scripts
+        # can exec their underlying x86_64-conda-linux-gnu-zig-{cc,ar,ranlib,asm} basenames.
+        # The wrappers ship at $BUILD_PREFIX/share/zig/wrappers/ but zig's activate.d only
+        # exports ZIG_CC/ZIG_AR env vars, not PATH (so the dir isn't otherwise on PATH).
+        run_logged "crossopt" env "PATH=${BUILD_PREFIX}/share/zig/wrappers:${PATH}" "${MAKE[@]}" crossopt "${CROSSOPT_ARGS[@]}" -j"${CPU_COUNT}"
+      fi
 
       # --- Install crossopt ---
       echo "  [6/7] Installing cross-compiler via 'make installcross'..."
@@ -5228,10 +5288,12 @@ EOF
         echo "    libasmrun.a object: $_arch_info"
         # Check architecture matches target (use | not \| with grep -E)
         case "${CROSS_ARCH}" in
-          arm64) _expected="arm64|ARM64|AArch64|aarch64" ;;
+          arm64)   _expected="arm64|ARM64|AArch64|aarch64" ;;
           aarch64) _expected="AArch64|aarch64|arm64|ARM64" ;;
-          power) _expected="PowerPC|ppc64" ;;
-          *) _expected="${CROSS_ARCH}" ;;
+          power)   _expected="PowerPC|ppc64" ;;
+          riscv)   _expected="RISC-V|RISCV|riscv" ;;
+          s390x)   _expected="IBM S/390|S/390|s390" ;;
+          *)       _expected="${CROSS_ARCH}" ;;
         esac
         if ! echo "$_arch_info" | grep -qiE "$_expected"; then
           echo "    ✗ ERROR: libasmrun.a has WRONG architecture!"
@@ -5361,6 +5423,16 @@ build_cross_target() {
   CROSS_ARCH=$(get_target_arch "${host_alias}")
   CROSS_PLATFORM=$(get_target_platform "${host_alias}")
 
+  # Stage 3: determine zstd availability for this target platform.
+  # Minority arches (s390x, riscv64) have no zstd on conda-forge; skip -lzstd and --without-zstd.
+  TARGET_ZSTD_AVAILABLE=1
+  case "${target_platform}" in
+    linux-s390x|linux-riscv64)
+      TARGET_ZSTD_AVAILABLE=0
+      echo "  [zstd-fast-path] ${target_platform}: known to lack zstd; setting TARGET_ZSTD_AVAILABLE=0"
+      ;;
+  esac
+
   # Platform-specific settings
   NEEDS_DL=0
   CROSS_MODEL=""
@@ -5377,10 +5449,25 @@ build_cross_target() {
       ;;
   esac
 
-  if [[ -z ${CROSS_CC:-} ]]; then
+  # Guard on CROSS_CFLAGS rather than CROSS_CC: CC may be exported by Stage 2 env file
+  # but the *FLAGS variables (-march=z13 -mzarch for s390x, etc.) may not be.
+  if [[ -z ${CROSS_CFLAGS:-} ]]; then
     # This is for the case of compatible previous conda-forge OCAML - otherwise, 3-stage sets these correctly
     setup_toolchain "CROSS" "${host_alias}"
     setup_cflags_ldflags "CROSS" "${build_platform}" "${target_platform}"
+  fi
+
+  # Defensive: if CROSS_ASPPFLAGS is unset but we're targeting an arch that needs it
+  # (e.g. s390x requires -march=z13 -mzarch), re-run setup_cflags_ldflags to populate it.
+  # This handles the fast-path case where CROSS_CFLAGS was already set from Stage 2 env
+  # file but CROSS_ASPPFLAGS was not included in that env file.
+  if [ -z "${CROSS_ASPPFLAGS:-}" ]; then
+    case "${target_platform}" in
+      linux-s390x)
+        echo "[s390x-asm-fix-v2] CROSS_ASPPFLAGS empty; re-running setup_cflags_ldflags to populate"
+        setup_cflags_ldflags "CROSS" "${build_platform}" "${target_platform}"
+        ;;
+    esac
   fi
 
   # CRITICAL: Export CFLAGS/LDFLAGS to environment with clean CROSS values
@@ -5499,8 +5586,24 @@ EOF
     RANLIB="${CROSS_RANLIB}"
   )
 
+  # Pass ASPPFLAGS so configure captures -march=z13 -mzarch (for s390x) into Makefile.config
+  if [ -n "${CROSS_ASPPFLAGS:-}" ]; then
+      CONFIG_ARGS+=("ASPPFLAGS=${CROSS_ASPPFLAGS}")
+  fi
+
+  # Export ASPPFLAGS for the make step that follows configure
+  if [ -n "${CROSS_ASPPFLAGS:-}" ]; then
+      export ASPPFLAGS="${CROSS_ASPPFLAGS}"
+      echo "[s390x-asm-fix] Exported ASPPFLAGS=${ASPPFLAGS} for Stage 3 make"
+  fi
+
   if [[ "${target_platform}" == "linux-"* ]]; then
     CONFIG_ARGS+=(ac_cv_func_getentropy=no)
+  fi
+
+  # Stage 3: skip zstd compression support on minority arches that have no conda-forge zstd package
+  if [[ "${TARGET_ZSTD_AVAILABLE}" == "0" ]]; then
+    CONFIG_ARGS+=(--without-zstd)
   fi
 
   # Install conda-ocaml-* wrapper scripts to BUILD_PREFIX (needed during build)
@@ -5538,16 +5641,20 @@ EOF
   apply_cross_patches
 
   # Shared args for crosscompiledopt and crosscompiledruntime
+  _zstd_libs_arg=""
+  if [[ "${TARGET_ZSTD_AVAILABLE}" == "1" ]]; then
+    _zstd_libs_arg="-L${PREFIX}/lib -lzstd"
+  fi
   CROSS_TARGET_COMMON_ARGS=(
     ARCH="${CROSS_ARCH}"
     CAMLOPT="${CROSS_OCAMLOPT}"
     AS="${CROSS_AS}"
-    ASPP="${CROSS_CC} -c"
+    ASPP="${CROSS_CC} -c ${CROSS_ASPPFLAGS:-}"
     CC="${CROSS_CC}"
     CROSS_CC="${CROSS_CC}"
     CROSS_AR="${CROSS_AR}"
     CROSS_MKLIB="${CROSS_OCAMLMKLIB}"
-    ZSTD_LIBS="-L${PREFIX}/lib -lzstd"
+    ZSTD_LIBS="${_zstd_libs_arg}"
     LIBDIR="${OCAML_INSTALL_PREFIX}/lib/ocaml"
     OCAMLLIB="${OCAMLLIB}"
     CONDA_OCAML_AS="${CROSS_AS}"
@@ -5558,12 +5665,24 @@ EOF
     SAK_CC="${SAK_CC_GNU:-${NATIVE_CC}}"
     SAK_CFLAGS="${NATIVE_CFLAGS}"
   )
+  # s390x (and any minority arch needing arch-level flags) requires ASPPFLAGS on the
+  # make command line, not just env-exported, because OCaml's recursive make[1] for
+  # runtime/ does not honor env-exported ASPPFLAGS reliably.
+  if [ -n "${CROSS_ASPPFLAGS:-}" ]; then
+    CROSS_TARGET_COMMON_ARGS+=("ASPPFLAGS=${CROSS_ASPPFLAGS}")
+    echo "[s390x-asm-fix-v2] Added ASPPFLAGS=${CROSS_ASPPFLAGS} to CROSS_TARGET_COMMON_ARGS"
+  fi
 
   # ============================================================================
   # Build crosscompiledopt
   # ============================================================================
 
   echo "  [3/5] Building crosscompiledopt ==="
+
+  _zstd_libflag=""
+  if [[ "${TARGET_ZSTD_AVAILABLE}" == "1" ]]; then
+    _zstd_libflag="-lzstd"
+  fi
 
   (
     CROSSCOMPILEDOPT_ARGS=(
@@ -5575,8 +5694,8 @@ EOF
     if [[ "${target_platform}" == "linux-"* ]]; then
       CROSSCOMPILEDOPT_ARGS+=(
         CPPFLAGS="-D_DEFAULT_SOURCE"
-        NATIVECCLIBS="-L${PREFIX}/lib -lm -ldl -lzstd"
-        BYTECCLIBS="-L${PREFIX}/lib -lm -lpthread -ldl -lzstd"
+        NATIVECCLIBS="-L${PREFIX}/lib -lm -ldl ${_zstd_libflag}"
+        BYTECCLIBS="-L${PREFIX}/lib -lm -lpthread -ldl ${_zstd_libflag}"
       )
     fi
 
@@ -5607,8 +5726,8 @@ EOF
     else
       CROSSCOMPILEDRUNTIME_ARGS+=(
         CPPFLAGS="-D_DEFAULT_SOURCE"
-        BYTECCLIBS="-L${PREFIX}/lib -lm -lpthread -ldl -lzstd"
-        NATIVECCLIBS="-L${PREFIX}/lib -lm -ldl -lzstd"
+        BYTECCLIBS="-L${PREFIX}/lib -lm -lpthread -ldl ${_zstd_libflag}"
+        NATIVECCLIBS="-L${PREFIX}/lib -lm -ldl ${_zstd_libflag}"
         SAK_LINK="${NATIVE_CC} \$(OC_LDFLAGS) \$(LDFLAGS) \$(OUTPUTEXE)\$(1) \$(2)"
       )
     fi
@@ -5924,10 +6043,14 @@ GNUEOF
     done < <(find "${OCAML_XCROSS_INSTALL_PREFIX}" -type l -print0 2>/dev/null)
     echo "    v05_03BL: removed ${_bl_dangling} dangling symlinks from ${OCAML_XCROSS_INSTALL_PREFIX}"
   fi
-  # v05_03BM: --dereference converts symlinks to regular file copies during tar
-  # creation. MSYS2 tar fails to extract symlinks on Windows due to privilege
-  # limits even when targets exist; dereferencing avoids the problem entirely.
-  tar -C "${_bk_src}" --dereference -cf - . | tar -C "${_bk_dst}" -xf -
+  # v05_03BM/BU: --dereference only when running under MSYS2 (Windows). On Unix,
+  # preserving symlinks is the original/correct behavior; --dereference there
+  # would double-copy file contents and break shebang resolution.
+  _bu_tar_extra=""
+  if command -v cygpath >/dev/null 2>&1; then
+    _bu_tar_extra="--dereference"
+  fi
+  tar -C "${_bk_src}" ${_bu_tar_extra} -cf - . | tar -C "${_bk_dst}" -xf -
 
   # Fix cross-compiler Makefile.config and ld.conf
   for cross_dir in "${OCAML_INSTALL_PREFIX}"/lib/ocaml-cross-compilers/*/; do
@@ -5975,6 +6098,12 @@ if [[ "${BUILD_MODE}" == "cross-target" ]]; then
   echo ""
   echo "=== Cross-target build: Using cross-compiler from BUILD_PREFIX ==="
   echo "  Cross-compiler: ${CROSS_COMPILER_DIR}"
+
+  # First-build bootstrap fallback for new arches (rare path; isolated in its own file)
+  if [[ ! -f "${CROSS_COMPILER_DIR}/lib/ocaml/stdlib.cma" ]] && [[ -f "${RECIPE_DIR}/building/bootstrap-fallback-cross-target.sh" ]]; then
+      source "${RECIPE_DIR}/building/bootstrap-fallback-cross-target.sh"
+      bootstrap_cross_target_from_inline
+  fi
 
   if [[ ! -f "${CROSS_COMPILER_DIR}/lib/ocaml/stdlib.cma" ]]; then
     echo "ERROR: Cross-compiler not found at ${CROSS_COMPILER_DIR}"

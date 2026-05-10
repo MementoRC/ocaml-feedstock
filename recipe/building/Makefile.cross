@@ -227,11 +227,29 @@ BYTECODE_RUNTIME_VARS = \
 # provide both entry points so lld selects /subsystem:console via mainCRTStartup.
 # -Wl,--subsystem,console is the GNU/LLD MinGW linker flag (not GCC-specific);
 # do NOT use -mconsole (GCC-only alias, unsupported by zig).
+# v05_03BW: gate runtime_winmain_stub on Windows targets.
+# On non-Windows (linux/osx), runtime_winmain_stub uses windows.h which doesn't exist.
+ifeq "$(UNIX_OR_WIN32)" "win32"
 BYTECODE_RUNTIME_VARS_WITH_STUB = \
   SAK_CC='$(SAK_CC)' SAK_CFLAGS='$(SAK_CFLAGS)' \
   'SAK_LINK=$(SAK_CC) $(SAK_LDFLAGS) $$(OUTPUTEXE)$$(1) $$(2)' \
   'MKEXE=$(SAK_CC) $(SAK_CFLAGS) $(SAK_LDFLAGS) -Wl,--subsystem,console' \
   'BYTECCLIBS=$(SAK_BYTECCLIBS) flexdll_stub.$$(O) runtime_winmain_stub.$$(O)'
+else
+# v05_03CA: drop flexdll_stub.$$(O) on non-Windows targets — flexdll is
+# Windows-only (CAML_WITH_FLEXDLL); the BOOTSTRAPPING_FLEXDLL=false branch
+# of crossopt does not generate flexdll_stub.c, so referencing the .o here
+# fails with "ld: cannot find flexdll_stub.o" on linux/osx cross_target builds.
+# v05_03CB: append $(ZSTD_LIBS) -lm -lpthread -ldl — BUILD-machine ocamlruni
+# link needs system libs (math, pthread, dl) and zstd (for marshal compression).
+# SAK_BYTECCLIBS inherits target-configured BYTECCLIBS which does not always
+# carry these on cross_target_platform_* (true cross BUILD != TARGET) variants.
+BYTECODE_RUNTIME_VARS_WITH_STUB = \
+  SAK_CC='$(SAK_CC)' SAK_CFLAGS='$(SAK_CFLAGS)' \
+  'SAK_LINK=$(SAK_CC) $(SAK_LDFLAGS) $$(OUTPUTEXE)$$(1) $$(2)' \
+  'MKEXE=$(SAK_CC) $(SAK_CFLAGS) $(SAK_LDFLAGS)' \
+  'BYTECCLIBS=$(SAK_BYTECCLIBS) $(ZSTD_LIBS) -lm -lpthread -ldl'
+endif
 
 .PHONY: crossopt
 ifeq "$(BOOTSTRAPPING_FLEXDLL)" "true"
@@ -241,7 +259,14 @@ crossopt: cross-flexdll
 	# generated MKEXE (flexlink arm64) is wrong for all exe targets.
 	# Modify the source file so ALL submakes read the correct value.
 	cp Makefile.config Makefile.config.crossopt_bak
+ifeq "$(UNIX_OR_WIN32)" "win32"
+	# v05_03CC: -Wl,--subsystem,console is a Windows-PE-only linker flag
+	# (GNU/LLD MinGW). Apple ld64 hard-errors on --subsystem; zig cc silently
+	# drops it on Linux ELF. Guard to win32 only.
 	sed -i 's|^MKEXE=.*|MKEXE=$(SAK_CC) -Wl,--subsystem,console|' Makefile.config
+else
+	sed -i 's|^MKEXE=.*|MKEXE=$(SAK_CC)|' Makefile.config
+endif
 	@echo "=== CROSSOPT DEBUG: MKEXE after sed ==="
 	@grep '^MKEXE=' Makefile.config || echo "MKEXE line not found!"
 	@echo "=== CROSSOPT DEBUG: SAK_CC=$(SAK_CC) MKEXE=$(MKEXE) ==="
@@ -268,7 +293,8 @@ crossopt: cross-flexdll
 	  'char *flexdll_dlerror(void) { return "flexdll stub"; }' \
 	  > flexdll_stub.c
 	$(SAK_CC) $(SAK_CFLAGS) -c -o flexdll_stub.$(O) flexdll_stub.c
-	# Build WinMain+main stub for ocamlrun.exe console subsystem.
+ifeq "$(UNIX_OR_WIN32)" "win32"
+	# v05_03BW: Build WinMain+main stub for ocamlrun.exe console subsystem (Windows only).
 	# zig's lld maps wmain() to GUI CRT (crtexewin.obj) regardless of -Wl,--subsystem,console.
 	# Adding WinMain() + main() causes lld to "default to /subsystem:console" and use
 	# mainCRTStartup. main() uses CommandLineToArgvW to obtain wide argv for wmain().
@@ -286,6 +312,7 @@ crossopt: cross-flexdll
 	  '  int r = wmain(wargc,wargv); if(wargv) LocalFree(wargv); return r; }' \
 	  > runtime_winmain_stub.c
 	$(SAK_CC) $(SAK_CFLAGS) -c -o runtime_winmain_stub.$(O) runtime_winmain_stub.c
+endif
 	# Build bytecode runtime with BUILD compiler (ocamlrun runs on BUILD machine)
 	# SAK_* override MAKEFLAGS to prevent cross-compiler flags (e.g., -mtune=power8)
 	# MKEXEDEBUGFLAG: configure sets this to '-link -g' (flexlink syntax); strip '-link'
@@ -293,7 +320,7 @@ crossopt: cross-flexdll
 	# v05_03n: Skip $(MAKE) runtime-all on win-arm64 (T31 binary already in place;
 	# re-link via SAK_CC hits arm64-vs-x64 crt2 mismatch). Other platforms unchanged.
 	@if [ "$(SKIP_CROSSOPT_RUNTIME_REBUILD)" != "true" ]; then \
-		$(MAKE) runtime-all V=1 CC=$(SAK_CC) CFLAGS="$(SAK_CFLAGS)" LDFLAGS="$(SAK_LDFLAGS)" AR="$(SAK_AR)" MKEXEDEBUGFLAG=-g $(BYTECODE_RUNTIME_VARS_WITH_STUB) $(OLDS); \
+		$(MAKE) runtime-all V=1 CC="$(SAK_CC)" CFLAGS="$(SAK_CFLAGS)" LDFLAGS="$(SAK_LDFLAGS)" AR="$(SAK_AR)" MKEXEDEBUGFLAG=-g $(BYTECODE_RUNTIME_VARS_WITH_STUB) $(OLDS); \
 	else \
 		echo "v05_03n: SKIP_CROSSOPT_RUNTIME_REBUILD=true, skipping $(MAKE) runtime-all (T31 binary already in place)"; \
 	fi
@@ -302,7 +329,11 @@ crossopt: cross-flexdll
 else
 crossopt:
 	cp Makefile.config Makefile.config.crossopt_bak
+ifeq "$(UNIX_OR_WIN32)" "win32"
 	sed -i 's|^MKEXE=.*|MKEXE=$(SAK_CC) -Wl,--subsystem,console|' Makefile.config
+else
+	sed -i 's|^MKEXE=.*|MKEXE=$(SAK_CC)|' Makefile.config
+endif
 	# v05_03n: Skip rm on win-arm64 cross-builds (T31 binary must be preserved).
 	# Other platforms (win-64, osx, linux) retain original behaviour.
 	@if [ "$(SKIP_CROSSOPT_RUNTIME_REBUILD)" != "true" ]; then \
@@ -310,6 +341,7 @@ crossopt:
 	else \
 		echo "v05_03n: SKIP_CROSSOPT_RUNTIME_REBUILD=true, skipping rm runtime/*.o *.a (else-branch)"; \
 	fi
+ifeq "$(UNIX_OR_WIN32)" "win32"
 	printf '%s\n' \
 	  '#include <windows.h>' \
 	  '#include <wchar.h>' \
@@ -324,10 +356,11 @@ crossopt:
 	  '  int r = wmain(wargc,wargv); if(wargv) LocalFree(wargv); return r; }' \
 	  > runtime_winmain_stub.c
 	$(SAK_CC) $(SAK_CFLAGS) -c -o runtime_winmain_stub.$(O) runtime_winmain_stub.c
+endif
 	# v05_03n: Skip $(MAKE) runtime-all on win-arm64 (T31 binary already in place).
 	# Other platforms unchanged.
 	@if [ "$(SKIP_CROSSOPT_RUNTIME_REBUILD)" != "true" ]; then \
-		$(MAKE) runtime-all V=1 CC=$(SAK_CC) CFLAGS="$(SAK_CFLAGS)" LDFLAGS="$(SAK_LDFLAGS)" AR="$(SAK_AR)" MKEXEDEBUGFLAG=-g $(BYTECODE_RUNTIME_VARS_WITH_STUB) $(OLDS); \
+		$(MAKE) runtime-all V=1 CC="$(SAK_CC)" CFLAGS="$(SAK_CFLAGS)" LDFLAGS="$(SAK_LDFLAGS)" AR="$(SAK_AR)" MKEXEDEBUGFLAG=-g $(BYTECODE_RUNTIME_VARS_WITH_STUB) $(OLDS); \
 	else \
 		echo "v05_03n: SKIP_CROSSOPT_RUNTIME_REBUILD=true, skipping $(MAKE) runtime-all (else-branch, T31 binary already in place)"; \
 	fi

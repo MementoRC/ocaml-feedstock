@@ -1,22 +1,8 @@
-# ==============================================================================
-# OCaml Multi-Output Variants Configuration (GCC Pattern)
-# ==============================================================================
-#
-# Following ctng-compilers-feedstock pattern:
-# - Only cross_target_platform is a variant key (cleaner filenames)
-# - Triplet and build_platform are derived in recipe.yaml using match()
-#
-# Variant filenames will be clean:
-#   linux_64_cross_target_platform_linux-64.yaml
-#   linux_64_cross_target_platform_linux-aarch64.yaml
-#   osx_64_cross_target_platform_osx-arm64.yaml
-#
-# ==============================================================================
-
 c_compiler:
   - if: linux
     then:
       - gcc
+      - zig
   - if: osx
     then:
       - clang
@@ -28,13 +14,13 @@ c_compiler:
 c_compiler_version:
   - if: linux
     then:
-      - 14
+      - "14"
   - if: osx
     then:
       - 19
   - if: not unix
     then:
-      - "2022"
+      - 19
 
 c_stdlib:
   - if: linux
@@ -78,6 +64,8 @@ cross_target_platform_:
   - linux-64
   - linux-aarch64
   - linux-ppc64le
+  - linux-riscv64
+  - linux-s390x
   - osx-64
   - osx-arm64
   - win-64
