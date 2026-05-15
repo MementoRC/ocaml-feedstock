@@ -43,7 +43,29 @@ run_logged() {
   else
     local rc=$?
     echo "${indent} FAILED (${rc}) - see ${logfile##*/}"
-    tail -100 "${logfile}" | sed "s/^/${indent} /"
+    echo "${indent} --- W15: error-signature lines in ${logfile##*/} (|| true guards: grep no-match must NOT abort run_logged under set -euo pipefail) ---"
+    # W40 2026-07-30: added '\[W[0-9]' alternative so bracketed W-tag diagnostic
+    # markers (e.g. [W37-DIAG], [W38], [W39]) surface here even when they precede
+    # the tail -300 window below (crossopt.log can run well past 300 lines before
+    # the actual failure; these unconditional echo diagnostics from Makefile.cross
+    # were being written but never appeared in CI-visible failure context).
+    grep -n -iE 'error:|error [0-9]|\*\*\*|undefined|unresolved|lld-link|flexlink|STATUS_|Exception|cannot find|fatal error|no such file|\[W[0-9]' "${logfile}" 2>/dev/null | head -80 | sed "s/^/${indent} /" || true
+    # W7PP 2026-08-09: W40 added the '\[W[0-9]' alternative to the grep above so W-tag markers
+    # would surface, but it shares that grep's `head -80` budget with error:|lld-link|flexlink|
+    # undefined|unresolved -- patterns which occur constantly in crossopt.log (40000+ lines on
+    # the win-arm64 lane). The budget is exhausted by early error-signature matches long before
+    # the [W42]/[W7HH] cache-priming diagnostics are reached, so in practice W40 never surfaced
+    # them. Round 50 (build 1565075 log 60) showed the last surviving [Wxx] line was
+    # Makefile.cross:894 -- the line immediately BEFORE the W42 if-block -- which looked like
+    # the block had not executed. It had not been proven either way; the output was simply
+    # never printed. Give the W-tag markers a DEDICATED pass with their own budget so they
+    # never compete with error-signature matches again.
+    # Failure-branch only: this code runs solely after a command has already failed, so it
+    # cannot affect any passing lane.
+    echo "${indent} --- W7PP: ALL [Wxx]-tagged diagnostics in ${logfile##*/} (dedicated pass) ---"
+    grep -n -E '\[W[0-9A-Z]' "${logfile}" 2>/dev/null | head -300 | sed "s/^/${indent} /" || true
+    echo "${indent} --- W15: last 300 lines ---"
+    tail -300 "${logfile}" 2>/dev/null | sed "s/^/${indent} /" || true
     return ${rc}
   fi
 }
@@ -93,10 +115,10 @@ find_tool() {
                   2>/dev/null | head -1)
   else
     tool_path=$(find \
-                  "${_BUILD_PREFIX_}"/Library/bin \
-                  "${_PREFIX_}"/Library/bin \
-                  "${_BUILD_PREFIX_}"/bin \
-                  "${_PREFIX_}"/bin \
+                  "${BUILD_PREFIX}"/Library/bin \
+                  "${PREFIX}"/Library/bin \
+                  "${BUILD_PREFIX}"/bin \
+                  "${PREFIX}"/bin \
                   \( -name "${tool_name}" -o -name "${tool_name}.exe" \) \
                   \( -type f -o -type l \) \
                   -perm /111 2>/dev/null | head -1)
@@ -376,8 +398,9 @@ setup_cflags_ldflags() {
   [[ "${target}" != "linux-"* ]] && [[ "${target}" != "osx-"* ]] && target="nonunix-${target#*-}"
   
   case "${name}_${native}_${target}" in
-    CROSS_nonunix-64_nonunix-arm64|CROSS_nonunix-arm64_nonunix-arm64)
-      # cross non-unix arm64 uses zig
+    CROSS_nonunix-64_nonunix-arm64|CROSS_nonunix-arm64_nonunix-arm64|CROSS_nonunix-64_nonunix-64)
+      # W3QQ: cross non-unix uses zig (handles arm64 target AND win-64 intermediate
+      # cross-compiler built during win-arm64 cross-compile job)
       export "${name}_CFLAGS="
       export "${name}_LDFLAGS="
       ;;
@@ -555,15 +578,47 @@ setup_toolchain() {
              *-conda-linux-gnu*)    _zig_target="${1%%-conda-linux-gnu*}-linux-gnu" ;;
              *)                     _zig_target="${target}" ;;  # pass through as-is
          esac
-         _native_zig=$(echo "${ZIG}")
+         # W3VV: For NATIVE toolchain in CROSS-COMPILE mode only, prefer the build-host-arch
+         # zig binary. ZIG would point at the cross-target arch zig in cross-compile mode,
+         # but a NATIVE_CC binary must EXECUTE on the build machine. Path is normalized
+         # backslash-to-forward-slash for make/sh compatibility on Windows.
+         # Restricted to (build_platform != target_platform) so the win-64 native variant
+         # (which was passing pre-W3UU) keeps its original ZIG selection.
+         _native_zig="${ZIG//\\//}"
+         if [[ "${1}" == "NATIVE" ]] && [[ "${build_platform:-}" != "${target_platform:-}" ]]; then
+             case "${build_platform:-${target_platform}}" in
+                 win-64)    _w3vv_host_zig="${BUILD_PREFIX}/Library/bin/x86_64-w64-mingw32-zig.exe" ;;
+                 win-arm64) _w3vv_host_zig="${BUILD_PREFIX}/Library/bin/aarch64-w64-mingw32-zig.exe" ;;
+                 *)         _w3vv_host_zig="" ;;
+             esac
+             if [[ -n "${_w3vv_host_zig:-}" ]] && [[ -x "${_w3vv_host_zig}" ]]; then
+                 _native_zig="${_w3vv_host_zig//\\//}"
+                 echo "  [W3VV] NATIVE cross-compile: using build-host zig: ${_native_zig}"
+             fi
+             unset _w3vv_host_zig
+             # W4AB: also override _zig_target to match build host arch
+             # (W3VV picked the right binary; without this, target stays as host triplet
+             #  and produces wrong-arch PE that cannot run on build host)
+             case "${build_platform:-${target_platform}}" in
+                 win-64)     _zig_target="x86_64-windows-gnu" ;;
+                 win-arm64)  _zig_target="aarch64-windows-gnu" ;;
+                 linux-64)   _zig_target="x86_64-linux-gnu" ;;
+                 linux-aarch64) _zig_target="aarch64-linux-gnu" ;;
+                 osx-64)     _zig_target="x86_64-macos" ;;
+                 osx-arm64)  _zig_target="aarch64-macos" ;;
+             esac
+             echo "[W4AC] NATIVE cross-compile detected: _native_zig=${_native_zig} _zig_target=${_zig_target} build_platform=${build_platform}"
+         fi
          _CC="${_native_zig} cc -target ${_zig_target}"
          _AS="${_native_zig} cc -target ${_zig_target}"
-         _AR="${ZIG_AR:-${_native_zig} ar}"
+         _AR="${ZIG_AR:+${ZIG_AR//\\//}}"
+         _AR="${_AR:-${_native_zig} ar}"
          _LD="${_native_zig} cc -target ${_zig_target}"
          _NM="${_native_zig} nm"
          # Derive ranlib from ar path: zig-ar.bat → zig-ranlib.bat, zig-ar → zig-ranlib
          if [[ -n "${ZIG_AR:-}" ]]; then
-           _RANLIB="${ZIG_AR/zig-ar/zig-ranlib}"
+           _RANLIB="${ZIG_AR//\\//}"
+           _RANLIB="${_RANLIB/zig-ar/zig-ranlib}"
          else
            _RANLIB="${_native_zig} ranlib"
          fi
@@ -584,11 +639,13 @@ setup_toolchain() {
          _zig=$(find_tool "${target}-zig" false 2>/dev/null || command -v "${target}-zig")
          _CC="${_zig} cc"
          _AS="${_zig} cc"
-         _AR="${ZIG_AR:-${_zig} ar}"
+         _AR="${ZIG_AR:+${ZIG_AR//\\//}}"
+         _AR="${_AR:-${_zig} ar}"
          _LD="${_zig} cc"
          _NM="${_zig} nm"
          if [[ -n "${ZIG_AR:-}" ]]; then
-           _RANLIB="${ZIG_AR/zig-ar/zig-ranlib}"
+           _RANLIB="${ZIG_AR//\\//}"
+           _RANLIB="${_RANLIB/zig-ar/zig-ranlib}"
          else
            _RANLIB="${_zig} ranlib"
          fi
@@ -634,7 +691,33 @@ setup_toolchain() {
   esac
 
   # Export all
-  export "${name}_AR=${_AR}" "${name}_AS=${_AS}" "${name}_CC=${_CC}" "${name}_RANLIB=${_RANLIB}"
+  export "${name}_AR=${_AR}" "${name}_AS=${_AS}" "${name}_RANLIB=${_RANLIB}"
+  # W7EE: on the win-arm64 bootstrap-native path, bootstrap-fallback-native.sh forces
+  # target_platform=build_platform, which skips the W3VV host-zig override above (guard
+  # requires build_platform != target_platform). setup_toolchain then recomputes _CC from
+  # the still-arm64-targeted ZIG and would clobber the correct x86_64 host NATIVE_CC that
+  # build.sh's _w3ff_ensure_host_native_cc already exported before this call. Preserve it
+  # instead of overwriting, but ONLY when role=NATIVE, build host is win-64, and the current
+  # NATIVE_CC already matches the exact x86_64-host zig invocation _w3ff sets. Every other
+  # path (role != NATIVE, non-win-64 build host, NATIVE_CC not pre-set to this exact form,
+  # gcc/vs variants) falls through to the original unconditional export unchanged.
+  #
+  # W7FF REGRESSION FIX: the W7EE guard above was under-restrictive and also fired on the
+  # PLAIN win-64 TARGET job (build_platform==target_platform==win-64, role=NATIVE), where
+  # NATIVE_CC legitimately matches the x86_64-host substring. Skipping the export there kept
+  # _w3ff's raw-${BUILD_PREFIX} NATIVE_CC (native Windows backslashes, NOT normalized) instead
+  # of the backslash-normalized _CC computed at line 568, so /bin/sh -c ate the backslashes
+  # in make recipes (C:\bld\... -> C:bld...zig.exe: No such file or directory), breaking
+  # world.opt. The true intent is "do not clobber the x86_64 host CC with an ARM64 _CC", so
+  # gate additionally on _CC NOT already being x86_64: on the plain win-64 job _CC targets
+  # x86_64-windows-gnu (condition false -> normal export, regression fixed); on the win-arm64
+  # bootstrap-native path _CC targets aarch64-windows-gnu (condition true -> preserve x86_64
+  # host CC, W7EE behaviour retained). Most-restrictive guard per shared-helper-scope rule.
+  if [[ "${1}" == "NATIVE" && "${build_platform:-}" == "win-64" && "${NATIVE_CC:-}" == *"x86_64-w64-mingw32-zig.exe cc -target x86_64-windows-gnu"* && "${_CC}" != *"x86_64-windows-gnu"* ]]; then
+      echo "[W7EE/W7FF] setup_toolchain: preserving host-x86_64 NATIVE_CC set by _w3ff (${NATIVE_CC}); NOT clobbering with ${_CC} (arm64 on the win-arm64 bootstrap-native path)"
+  else
+      export "${name}_CC=${_CC}"
+  fi
   export "${name}_NM=${_NM}" "${name}_STRIP=${_STRIP}" "${name}_LD=${_LD}"
   export "${name}_ASM=${_ASM}" "${name}_MKDLL=${_MKDLL}" "${name}_MKEXE=${_MKEXE}"
 }
@@ -921,6 +1004,121 @@ patch_makefile_config_post_configure() {
   # CPP has flags after binary (e.g., "/path/to/clang -E -P" -> "clang -E -P")
   # The ( .*)? is optional to handle CPP without flags
   sed -Ei 's#^(CPP)=/.*/([^/ ]+)( .*)?$#\1=\2\3#' "${config_file}"
+
+  # Strip GCC-specific linker flags that crash zig's lld (all build modes):
+  #   -l:libpthread.a  — colon syntax (exact filename) is GNU ld extension that
+  #                      triggers zig's "reached unreachable code" panic
+  #   -lgcc_eh         — GCC exception handling library; zig doesn't ship this
+  #   -lgcc            — GCC runtime; zig uses compiler_rt internally
+  #   -lmingwex        — MinGW extended C lib; zig's libc covers it
+  #   -lmingw32        — MinGW core lib; zig's libc covers it
+  # All are unnecessary with zig: Windows native threads replace pthreads,
+  # and zig provides its own unwinding. This guard is safe on all platforms
+  # because none of these flags appear in non-zig (GCC/clang) Makefile.config outputs.
+  # ORDER: strip -lgcc_eh before bare -lgcc so "_eh" is not left orphaned.
+  if ! is_unix && [[ -f "${config_file}" ]]; then
+    if grep -qE '\-l:libpthread\.a|\-lgcc_eh|\-lgcc|\-lmingwex|\-lmingw32' "${config_file}"; then
+      echo "[zig-unreachable-workaround] stripping -l:libpthread.a, -lgcc_eh, -lgcc, -lmingwex, -lmingw32 from Makefile.config"
+      echo "=== DIAG: BYTECCLIBS pre-strip ==="
+      grep '^BYTECCLIBS=' "${config_file}" || echo "(no BYTECCLIBS line)"
+      echo "=== DIAG: NATIVECCLIBS pre-strip ==="
+      grep '^NATIVECCLIBS=' "${config_file}" || echo "(no NATIVECCLIBS line)"
+      # [W7VV] round 59: finish what W7UU started. W7UU (round 58) deleted -l:libpthread.a
+      # only from utils/config.generated.ml; build 1565826 log 60 then showed BYTECCLIBS
+      # pre-strip `-l:libpthread.a` -> post-strip `-lpthread` (lines 1079-1098), i.e. THIS
+      # rewrite kept manufacturing the bare flag, and the cross-flexdll HOST self-link died
+      # on `lld-link: error: pthread_cancel was replaced` at log:10100. Guard verified on the
+      # same build: [W7UU] fired only in the win-arm64 native log (host_platform=win-arm64,
+      # log:962) and never in the green win-64 log (host_platform=win-64, log:988), so this
+      # guard cannot leak into a green lane (feedback_shared_helper_scope).
+      echo "  [W7VV-DIAG] observed host_platform='${host_platform:-<unset>}' target_platform='${target_platform:-<unset>}' build_platform='${build_platform:-<unset>}'"
+      if [[ "${host_platform:-}" == "win-arm64" ]]; then
+        _w7vv_pthread_sed='s/ -l:libpthread\.a//g'
+        echo "  [W7VV] win-arm64 NATIVE: DELETING -l:libpthread.a from ${config_file} (zig auto-links its own winpthreads)"
+      else
+        _w7vv_pthread_sed='s/ -l:libpthread\.a/ -lpthread/g'
+      fi
+      sed -i \
+        -e "${_w7vv_pthread_sed}" \
+        -e 's/ -lgcc_eh\([[:space:]]\|$\)/\1/g;
+            s/ -lgcc\([[:space:]]\|$\)/\1/g;
+            s/ -lmingwex\([[:space:]]\|$\)/\1/g;
+            s/ -lmingw32\([[:space:]]\|$\)/\1/g' \
+        "${config_file}"
+      echo "=== DIAG: BYTECCLIBS post-strip ==="
+      grep '^BYTECCLIBS=' "${config_file}" || echo "(no BYTECCLIBS line)"
+      echo "=== DIAG: NATIVECCLIBS post-strip ==="
+      grep '^NATIVECCLIBS=' "${config_file}" || echo "(no NATIVECCLIBS line)"
+    fi
+  fi
+
+  # Strip the same GCC-specific flags from config.status (autoconf re-run script).
+  # config.status stores S["PTHREAD_LIBS"] and S["cclibs"] values that autoconf
+  # re-injects into Makefile.config / config.generated.ml whenever make detects
+  # stale configure/config.status timestamps.  Without this strip, a timestamp
+  # re-run silently undoes every Makefile.config strip we applied above.
+  # The S["..."]= lines use shell-quoted double-quoted values, so the boundary
+  # class [[:space:]"] covers both whitespace between flags and the closing ".
+  # ORDER: whole-line empties FIRST (S["PTHREAD_LIBS"], S["link_gcc_eh"],
+  # S["LIBS"]) so the space-prefixed patterns below never see those values.
+  # Then -lgcc_eh before bare -lgcc so the "_eh" suffix is not left orphaned.
+  #
+  # S["PTHREAD_LIBS"] fix: the existing pattern ' -l:libpthread.a' required a
+  # leading space, but in S["PTHREAD_LIBS"] the value starts directly after '"'
+  # (no leading space), so '-l:libpthread.a' survived.  Zig bundles pthread
+  # support via its libc, so the safe fix is to empty the variable entirely.
+  #
+  # Makefile.config PTHREAD_LIBS direct-patch (defense-in-depth): even after
+  # config.status is stripped, some make rules re-read Makefile.config entries
+  # that were written before configure finished.  Ensure the Makefile.config
+  # PTHREAD_LIBS line is also normalized.
+  if [[ -f Makefile.config ]]; then
+    if [[ "${host_platform:-}" == "win-arm64" ]]; then
+      # [W7VV] round 59: empty it rather than forcing -lpthread. The comment above already
+      # says zig bundles pthread support via its libc, so forcing the flag back in re-created
+      # the very reference the strip above removes.
+      sed -i 's|^PTHREAD_LIBS=.*|PTHREAD_LIBS=|' Makefile.config || true
+      echo "  [W7VV] win-arm64 NATIVE: PTHREAD_LIBS emptied (was forced to -lpthread)"
+    else
+      sed -i 's|^PTHREAD_LIBS=.*|PTHREAD_LIBS=-lpthread|' Makefile.config || true
+    fi
+  fi
+
+  # W5S 2026-07-14: on Windows, MSYS2 arg-conversion leaves AR/RANLIB/LD/PARTIALLD as
+  # BACKSLASH paths in Makefile.config (MSYS2_ARG_CONV_EXCL is only set on the -pc- branch).
+  # /bin/sh then eats the backslashes at MKLIB time (Makefile:1412), mangling the ar path
+  # to a non-existent one (win-64 gcc MKLIB Error 127). NATIVE_AR itself is forward-slash;
+  # only the Makefile.config copy is corrupted. Normalize backslashes to forward slashes for
+  # these tool vars (no-op on unix, where these lines never contain backslashes). RANLIB is
+  # included because OCaml's MKLIB rule is `$(AR) rc ... && $(RANLIB) ...` (same rule).
+  if ! is_unix; then
+    if [[ -f Makefile.config ]]; then
+      sed -Ei '/^(AR|RANLIB|LD|PARTIALLD)=/ s#\\#/#g' Makefile.config || true
+    fi
+  fi
+
+  if [[ -f config.status ]]; then
+    echo "=== DIAG: config.status S[\"PTHREAD_LIBS\"] / S[\"cclibs\"] / S[\"LIBS\"] / S[\"link_gcc_eh\"] pre-strip ==="
+    grep -E '^S\["(PTHREAD_LIBS|cclibs|LIBS|link_gcc_eh)"\]=' config.status || echo "(no matching lines)"
+    # [W7VV] round 59: same delete-vs-rewrite choice as the Makefile.config block above.
+    if [[ "${host_platform:-}" == "win-arm64" ]]; then
+      _w7vv_cfgstatus_sed='/^S\[".*"\]=/s/ -l:libpthread\.a//g'
+    else
+      _w7vv_cfgstatus_sed='/^S\[".*"\]=/s/ -l:libpthread\.a/ -lpthread/g'
+    fi
+    sed -i \
+      -e 's|^S\["PTHREAD_LIBS"\]=".*"$|S["PTHREAD_LIBS"]=""|' \
+      -e 's|^S\["link_gcc_eh"\]=".*"$|S["link_gcc_eh"]=""|' \
+      -e '/^S\["LIBS"\]=.*\(-lgcc\|-l:libpthread\.a\)/s|^S\["LIBS"\]=".*"$|S["LIBS"]=""|' \
+      -e "${_w7vv_cfgstatus_sed}" \
+      -e '/^S\[".*"\]=/s/ -lgcc_eh\([[:space:]"]\|$\)/\1/g' \
+      -e '/^S\[".*"\]=/s/ -lgcc\([[:space:]"]\|$\)/\1/g' \
+      -e '/^S\[".*"\]=/s/ -lmingwex\([[:space:]"]\|$\)/\1/g' \
+      -e '/^S\[".*"\]=/s/ -lmingw32\([[:space:]"]\|$\)/\1/g' \
+      config.status
+    echo "=== DIAG: config.status S[\"PTHREAD_LIBS\"] / S[\"cclibs\"] / S[\"LIBS\"] / S[\"link_gcc_eh\"] post-strip ==="
+    grep -E '^S\["(PTHREAD_LIBS|cclibs|LIBS|link_gcc_eh)"\]=' config.status || echo "(no matching lines)"
+  fi
 }
 
 # ==============================================================================

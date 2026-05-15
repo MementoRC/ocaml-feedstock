@@ -44,9 +44,11 @@ int main(int argc, char *argv[]) {
     char *token;
 
     /* Get tool from environment, fall back to default */
+    /* XSTR(DEFAULT_TOOL) stringifies the bare-token macro value at compile time,
+     * avoiding shell-vs-Windows argv quoting issues with -DDEFAULT_TOOL=foo.exe */
     env_val = getenv(ENV_VAR_NAME);
     if (!env_val || env_val[0] == '\0') {
-        env_val = DEFAULT_TOOL;
+        env_val = XSTR(DEFAULT_TOOL);
     }
 
     /* Tokenize tool string on spaces (e.g. "zig.exe cc -target triple") */
@@ -64,6 +66,10 @@ int main(int argc, char *argv[]) {
 
     /* Append caller's argv[1..argc-1] */
     for (int i = 1; i < argc && new_argc < MAX_ARGS - 1; i++) {
+        /* W2S 2026-05-21: filter -Wl,-eFlexDLLiniter (flexlink DLL entry-point arg;
+           zig cc / lld-link rejects it as unsupported. flexlink emits it for OCaml
+           otherlibs/unix dllunixbyt.dll build under MSYS make. */
+        if (strcmp(argv[i], "-Wl,-eFlexDLLiniter") == 0) continue;
         new_argv[new_argc++] = argv[i];
     }
     new_argv[new_argc] = NULL;

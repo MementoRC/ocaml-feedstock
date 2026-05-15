@@ -27,23 +27,19 @@ context:
   # one c_compiler_version per platform, but Windows has 3 compilers)
   actual_c_compiler_version: >-
     ${{
-      "19"                          if c_compiler == "vs2022"                                                 else
-      "0.15.2"                      if c_compiler == "zig"                                                    else
-      "14"                          if c_compiler == "gcc" and not unix                                       else
+      "19"                          if c_compiler == "vs2022"                    else
+      "0.16.0"                      if c_compiler == "zig"                       else
+      "14"                          if c_compiler == "gcc" and not unix          else
       c_compiler_version
     }}
-  actual_c_stdlib_version: >-
-    ${{ 
-      "2.39"                      if xc_riscv64                              else
-      c_stdlib_version
-    }}
+  actual_c_stdlib_version: ${{ "2.39" if xc_riscv64 else c_stdlib_version }}
 
-  dot: ${{ "./" if unix else "" }}
+  dot:     ${{ "./" if unix else "" }}
   library: ${{ "Library/" if not unix else "" }}
-  m2: ${{ "m2-" if not unix else "" }}
-  sh: ${{ "sh" if unix else "bat" }}
-  so: ${{ "so" if unix else "dll" }}
-  xt: ${{ "" if unix else ".exe" }}
+  m2:      ${{ "m2-" if not unix else "" }}
+  sh:      ${{ "sh" if unix else "bat" }}
+  so:      ${{ "so" if unix else "dll" }}
+  xt:      ${{ "" if unix else ".exe" }}
 
   # ===========================================================================
   # GCC-style derived values (not variant keys - keeps filenames clean)
@@ -90,8 +86,10 @@ context:
   is_cross_target: ${{ (cross_target_platform_ == target_platform) and (build_platform != target_platform) }}
 
   # zig is only for linux-riscv64 and non-unix-arm64 cross-compilation - skip all other zig variants
-  skip_zig: ${{ c_compiler == "zig" and not (xc_riscv64 or xc_warm64) }}
+  skip_zig: ${{ c_compiler == "zig" and not (xc_riscv64 or xc_warm64 or xc_w64) }}
   skip_gcc: ${{ c_compiler == "gcc" and (xc_riscv64 or xc_warm64) }}
+  skip_vs: ${{ c_compiler == "vs2022" and xc_warm64 }}
+  skip_cc: ${{ skip_zig or skip_gcc or skip_vs }}
 
   # ===========================================================================
   # Debug/Development Settings
@@ -133,6 +131,14 @@ source:
           # Clang's __builtin_setjmp on Windows is incompatible → bytecode crash.
           # Exclude clang so it uses standard jmp_buf + setjmp/longjmp instead.
           - patches/fix-clang-mingw64-setjmp.patch
+          # PR97 W5M-F: increase win32 VEH alternate stack from 0x100 (2KB) to
+          # 0x4000 (128KB). The 2KB alt-stack is exhausted by Win32 API calls
+          # (GetSystemInfo, VirtualQuery, VirtualProtect) inside caml_reset_stack,
+          # causing STATUS_STACK_OVERFLOW recursion via caml_stack_overflow_VEH.
+          - patches/increase-win32-alt-stack.patch
+          # PR97 W5M-N: reentrancy guard on caml_try_realloc_stack to detect/break
+          # infinite recursion observed under Win64-zig (F1+F2 mutual recursion).
+          - patches/add-realloc-stack-reentrancy-guard.patch
   - if: not unix
     then:
       url: https://github.com/ocaml/flexdll/archive/refs/tags/${{ flexdll_version }}.tar.gz
@@ -143,6 +149,24 @@ source:
         # - build_mingw64arm target with MINGW64ARM_PREFIX
         # - windres fallback when cross-windres is not available
         - patches/flexdll-add-mingw64arm-support.patch
+        # Fix windres syntax error at version.rc:24: modern x86_64-w64-mingw32-windres
+        # rejects FLEXDLL_FULL_VERSION macro expansion in VALUE string entries.
+        # Replace macro references with hardcoded "0.44" string literals.
+        - patches/flexdll-version-rc-windres-syntax-fix.patch
+        # Fix mingw64 support target to produce .obj aliases alongside .o files.
+        # OCaml root Makefile:645 expects flexdll_mingw64.obj / flexdll_initer_mingw64.obj
+        # but flexdll Makefile only produced .o for the mingw64 chain. Adds .obj
+        # copy rules (additive, does not break other chains).
+        - patches/flexdll-makefile-obj-extension-for-mingw64.patch
+        # PR97 W31: guard flexdll's parse-time `$(shell ocamlopt -version)` and
+        # `$(shell ocamlopt -where)` probes with ifeq so they are skipped when the
+        # values are supplied via env. On win-arm64 the x86-64 ocamlopt.exe
+        # intermittently deadlocks at startup under x64-on-ARM64 emulation when
+        # spawned as a captured $(shell ...) probe, wedging `make -C flexdll` before
+        # any recipe runs (build 1551363 log51). build.sh exports OCAML_VERSION /
+        # OCAML_CONFIG_FILE for win-arm64 only; dormant (probe runs as before) on all
+        # other Windows builds, so win-64 native/cross are unaffected.
+        - patches/flexdll-makefile-skip-ocamlopt-probes.patch
   - if: not unix and c_compiler == "vs2022"
     then:
       url: https://github.com/ocaml/winpthreads/archive/d635af4d9bcce7f268b3e3c44f414611bbc66381.tar.gz
@@ -161,7 +185,8 @@ outputs:
   - package:
       name: ocaml
     build:
-      skip: cross_target_platform_ != target_platform or skip_zig or skip_gcc  # or not c_compiler == "zig"
+      skip: not (build_platform == "win-64" and target_platform in ["win-64", "win-arm64"] and cross_target_platform_ in ["win-64", "win-arm64"] and c_compiler == "zig")
+      # skip: cross_target_platform_ != target_platform or skip_cc
       noarch: generic
       script: echo "OCaml metapackage"
     requirements:
@@ -196,15 +221,16 @@ outputs:
   - package:
       name: ocaml_${{ cross_target_platform_ }}
     build:
-      string: ${{ c_compiler ~ "_" if not unix }}h${{ hash }}_${{ build_number }}
+      string: ${{ c_compiler ~ "_" if not unix else "" }}h${{ hash }}_${{ build_number }}
       script:
-        file: build.${{ sh }}
+        file: build.sh
         env:
           SKIP_MAKE_TESTS: "1"
           OCAML_TARGET_PLATFORM: "${{ cross_target_platform_ }}"
           OCAML_TARGET_TRIPLET: "${{ target_triplet }}"
           OCAML_USE_CACHE: "${{ use_cache }}"
-      skip: not (is_native or is_cross_compiler or is_cross_target) or skip_zig or skip_gcc  # or not c_compiler == "zig"
+      # skip: not (build_platform == "win-64" and target_platform in ["win-64", "win-arm64"] and cross_target_platform_ in ["win-64", "win-arm64"] and c_compiler == "zig")
+      skip: not (is_native or is_cross_compiler or is_cross_target) or skip_cc
       dynamic_linking:
         missing_dso_allowlist:
           - if: is_cross_compiler and xc_aarch64
@@ -265,6 +291,12 @@ outputs:
           - if: linux and xc_riscv64
             then:
               - sysroot_${{ cross_target_platform_ }}
+          - if: linux and xc_riscv64 and c_compiler == "zig"
+            then:
+              - zig
+              - zig_${{ cross_target_platform_ }}
+        by_name:
+          - zig_linux-riscv64
       run_exports:
         strong:
           - if: not unix and c_compiler == "gcc"
@@ -280,6 +312,10 @@ outputs:
             - if: c_compiler == "zig"
               then:
                 - ${{ compiler("zig") }}
+                # REMOVE THIS PIN once zig_win-arm64 ships a working build.
+                - if: target_platform == "win-arm64"
+                  then:
+                    - zig_win-arm64 ==0.16.0 *_9
                 # - ${{ c_compiler }}_${{ build_platform }} ${{ actual_c_compiler_version }}*
               else:
                 - ${{ compiler("m2w64_c") }}
@@ -323,10 +359,10 @@ outputs:
         # --- CROSS-TARGET: Bootstrap compiler for cross-compilation ---
         - if: is_cross_target
           then:
-            - ocaml_${{ build_platform }} >=5.4,<=${{ version }}
+            # - ocaml_${{ build_platform }} >=5.4,<=${{ version }}
             
             # Temporary guard since previous s390x cross-compiler does not exist
-            - if: target_platform != "linux-s390x" and target_platform != "linux-riscv64"
+            - if: target_platform != "linux-s390x" and target_platform != "linux-riscv64" and target_platform != "win-arm64"
               then:
                 - ocaml_${{ target_platform }} >=5.4,<=${{ version }}
 
@@ -347,6 +383,18 @@ outputs:
             - lld ${{ actual_c_compiler_version }}*
             - llvm-tools ${{ actual_c_compiler_version }}*
 
+        # --- win-64-specific ---
+        - if: target_platform == "win-64"
+          then:
+            - mingw-w64-ucrt-x86_64-headers-git
+            - mingw-w64-ucrt-x86_64-crt-git
+            # zig variant needs a pre-built libwinpthread.a (vs2022 builds from
+            # source tarball; gcc uses m2w64 toolchain); x86_64 package only
+            # (for win-arm64 zig a different aarch64 package would be needed)
+            - if: c_compiler == "zig"
+              then:
+                - mingw-w64-ucrt-x86_64-winpthreads-git
+
       host:
         - if: target_platform != "linux-s390x" and target_platform != "linux-riscv64"
           then:
@@ -356,12 +404,24 @@ outputs:
         - if: target_platform != "linux-s390x" and target_platform != "linux-riscv64"
           then:
             - zstd
+        # W3YY: mirror the full build-side win-64 mingw deps at line 366-375 into run.
+        # OCaml's libasmrun.lib references both pthread_* symbols (need winpthreads-git)
+        # and _tls_index (need crt-git which provides libmingw32.a + crt2.o). headers-git
+        # is needed because tests compile user C code at runtime. winpthreads-git is
+        # zig-variant-only (gcc/m2w64 toolchain provides its own pthread).
+        - if: target_platform == "win-64"
+          then:
+            - mingw-w64-ucrt-x86_64-headers-git
+            - mingw-w64-ucrt-x86_64-crt-git
+            - if: c_compiler == "zig"
+              then:
+                - mingw-w64-ucrt-x86_64-winpthreads-git
         # OCaml needs a C compiler at runtime — ocamlopt, conda-ocaml-mkexe,
         # conda-ocaml-mkdll all invoke the C compiler. Must use the activating
         # metapackages (not _impl) because _impl doesn't put tools in PATH.
         - if: is_native or is_cross_target
           then:
-            - if: not unix and (c_compiler == "gcc" or c_compiler == "zig") or riscv64 and c_compiler == "zig"
+            - if: (not unix or riscv64) and (c_compiler == "gcc" or c_compiler == "zig")
               then:
                 - if: c_compiler == "zig"
                   then:
@@ -423,7 +483,18 @@ outputs:
                 - conda-ocaml-{ar,as,cc,ld,mkdll,mkexe,ranlib}
                 - ocaml
                 - ocaml{c,dep,lex,objinfo,opt,mklib,yacc}
-                - ocaml{c,dep,lex,objinfo,opt,mklib,yacc}.opt
+                # W33 2026-07-29: zig-compiled Windows native builds never produce
+                # literal ocaml*.opt binaries under that name -- Makefile.cross's
+                # crossopt/install stages build ocamlc.opt/ocamlopt.opt in-tree for
+                # internal use only, and the upstream installopt `.opt` install
+                # targets are test -f guarded and silently skip since the win-64
+                # zig config never lands a same-named .opt install artifact (same
+                # "opt variant not produced on zig/Windows" pattern as W32's
+                # ocamldoc.opt handling). Relax for zig+Windows only; gcc/vs2022
+                # Windows and unix opt builds keep the strict requirement.
+                - if: unix or c_compiler != "zig"
+                  then:
+                    - ocaml{c,dep,lex,objinfo,opt,mklib,yacc}.opt
                 - ocaml{c,dep,lex,objinfo,opt}.byte
                 - ocaml{cmt,cp,debug,doc,doc.opt,mktop,optp,prof,run,rund}
                 - if: unix or c_compiler == "vs2022"
@@ -436,11 +507,23 @@ outputs:
                   then:
                     - flexlink
                     - flexlink.byte
-                    - flexlink.opt
                     - conda-ocaml-windres
+                # W33 2026-07-29: Makefile.cross:873-878 renames flexlink.opt.exe ->
+                # flexlink(.exe) at install time for zig/win native; the literal
+                # flexlink.opt name never lands in Library/bin on this config.
+                - if: not unix and c_compiler != "zig"
+                  then:
+                    - flexlink.opt
 
             # CROSS-TARGET: Native toolset (no ocamldebug/ocamldoc)
-            - if: is_cross_target
+            # W8AC 2026-08-12: exclude the win-arm64 cross-target lane. There
+            # build_platform=win-64 / target_platform=win-arm64 (build 1566862 log 67
+            # lines 1474-1487), so build.sh's build_cross_target() win-*) branch is a
+            # documented no-op stub (build.sh:11176-11183) and the native toolset below
+            # is produced by the win_64->win-arm64 cross lane instead. Narrowest guard:
+            # linux/osx cross-target lanes and any true is_native win-arm64 build keep
+            # the full contract unchanged.
+            - if: is_cross_target and not xc_warm64
               then:
                 - conda-ocaml-{ar,as,cc,ld,mkdll,mkexe,ranlib}
                 - ocaml
@@ -469,17 +552,36 @@ outputs:
           files:
             - etc/conda/test-files/*
 
-            # NATIVE/CROSS-TARGET: Standard layout
+            # NATIVE/CROSS-TARGET: entries present in EVERY mode, including the
+            # win-arm64 cross-target no-op stub. These three were confirmed MATCHING
+            # in build 1566862 log 67 (lines 25605-25621), so they stay unguarded.
             - if: is_native or is_cross_target
               then:
                 - etc/conda/activate.d/ocaml_activate.${{ sh }}
                 - etc/conda/deactivate.d/ocaml_deactivate.${{ sh }}
+                - ${{ library }}lib/ocaml/*.{a,cma,cmi,cmo,cmt,cmti,cmx,cmxa,ml,mli,o}
+
+            # CROSS-TARGET win-arm64: positive assertion of what the no-op-stub lane
+            # DOES ship, so this lane still tests something rather than nothing.
+            # W8AC 2026-08-12: CONFIRMED SHIPPED in build 1566862 - build.sh:5131-5135
+            # (W2NN FIX-M) copy-to-PREFIX loop executed (log:3076-3092) and these
+            # archives appear under "Files in package" (log:25483-25498). Verified in
+            # PREFIX, not BUILD_PREFIX - the log:2221-2236 listing is BUILD_PREFIX only.
+            - if: is_cross_target and xc_warm64
+              then:
+                - ${{ library }}lib/ocaml-x86_64-imports/*.a
+
+            # NATIVE/CROSS-TARGET: full install layout. W8AC 2026-08-12: absent on the
+            # win-arm64 cross-target lane (build_cross_target() win-*) is a no-op stub,
+            # build.sh:11176-11183). These globs were EXACTLY the package_contents
+            # failures in build 1566862 log 67 lines 25629-25639.
+            - if: is_native or (is_cross_target and not xc_warm64)
+              then:
                 - ${{ library }}lib/ocaml/expunge${{ xt }}
                 - ${{ library }}lib/ocaml/ld.conf
                 - ${{ library }}lib/ocaml/Makefile.config
                 - ${{ library }}lib/ocaml/runtime-launch-info
                 - ${{ library }}lib/ocaml/sys.ml.in
-                - ${{ library }}lib/ocaml/*.{a,cma,cmi,cmo,cmt,cmti,cmx,cmxa,ml,mli,o}
                 - ${{ library }}lib/ocaml/caml/domain_state.tbl
                 - ${{ library }}lib/ocaml/caml/*.h
                 - ${{ library }}lib/ocaml/{compiler-libs,dynlink,profiling,runtime_events,stdlib,str,threads,unix}/*
@@ -489,7 +591,8 @@ outputs:
                 - if: unix or c_compiler == "gcc"
                   then:
                     - ${{ library }}lib/ocaml/libasmrun.a
-                  else:
+                - if: not unix and c_compiler != "gcc" and c_compiler != "zig"
+                  then:
                     - ${{ library }}lib/ocaml/flexdll/flexdll_initer_msvc64.obj
                     - ${{ library }}lib/ocaml/flexdll/flexdll_msvc64.obj
                     - ${{ library }}lib/ocaml/libasm{run,rund,runi}.lib
@@ -690,7 +793,8 @@ outputs:
   - package:
       name: ocaml-compiler
     build:
-      skip: cross_target_platform_ != target_platform or skip_zig or skip_gcc  # or not c_compiler == "zig"
+      skip: not (build_platform == "win-64" and target_platform in ["win-64", "win-arm64"] and cross_target_platform_ in ["win-64", "win-arm64"] and c_compiler == "zig")
+      # skip: cross_target_platform_ != target_platform or skip_cc
       script: echo "Toolchain meta-package"
     requirements:
       run:
@@ -698,6 +802,9 @@ outputs:
         - if: unix or c_compiler == "gcc"
           then:
             - binutils_impl_${{ target_platform }}
+        - if: c_compiler == "zig"
+          then:
+            - ${{ compiler("zig") }}
     tests:
       # ----------------------------------------------------------------------
       # Package contents (metapackage - only test files)
@@ -1056,6 +1163,7 @@ outputs:
         files:
           recipe:
             - testing/test-compilation.${{ sh }}
+            - testing/w4ii_symbolize.py
         requirements:
           run:
             - if: target_platform != "linux-s390x" and target_platform != "linux-riscv64"
@@ -1065,6 +1173,10 @@ outputs:
             - if: linux
               then:
                 - sysroot_${{ cross_target_platform_ }} ${{ actual_c_stdlib_version }}.*
+            - if: c_compiler == "zig"
+              then:
+                - ${{ compiler("zig") }}
+            - pefile
 
       # ----------------------------------------------------------------------
       # CONDA_OCAML_* toolchain variable tests
@@ -1085,6 +1197,9 @@ outputs:
             - if: linux
               then:
                 - sysroot_${{ cross_target_platform_ }} ${{ actual_c_stdlib_version }}.*
+            - if: c_compiler == "zig"
+              then:
+                - ${{ compiler("zig") }}
 
   # ==========================================================================
   # DEVELOPMENT META-PACKAGE: ocaml-devel

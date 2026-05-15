@@ -1,0 +1,29 @@
+--- a/runtime/fiber.c
++++ b/runtime/fiber.c
+@@ -54,6 +54,12 @@
+ 
+ static _Atomic int64_t fiber_id = 0;
+ 
++#if !defined(_MSC_VER)
++/* W5M-N: reentrancy guard helpers for Win64-zig diagnostic */
++static _Thread_local int caml_w5mn_realloc_guard = 0;
++static inline void caml_w5mn_release(int *p) { (void)p; caml_w5mn_realloc_guard = 0; }
++#endif
++
+ uintnat caml_get_init_stack_wsize (void)
+ {
+   uintnat default_stack_wsize = Wsize_bsize(Stack_init_bsize);
+@@ -449,6 +455,13 @@
+ 
+ int caml_try_realloc_stack(asize_t required_space)
+ {
++#if !defined(_MSC_VER)
++  if (caml_w5mn_realloc_guard != 0) {
++    caml_fatal_error("[W5M-N] caml_try_realloc_stack recursion detected (Win64-zig)");
++  }
++  int __attribute__((cleanup(caml_w5mn_release))) caml_w5mn_token __attribute__((unused)) = (caml_w5mn_realloc_guard = 1);
++#endif
++
+   struct stack_info *old_stack, *new_stack;
+   asize_t wsize;
+   int stack_used;

@@ -107,16 +107,17 @@ EOF
     fi
 
     # Compile with appropriate flags for gcc vs cl
+    # DEFAULT_TOOL passed as bare token; C source uses XSTR() macro for stringification.
     if [[ "${CC}" == "cl" || "${CC}" == "cl.exe" ]]; then
         # MSVC cl.exe syntax
         "${_CC[@]}" /O2 /Fe:"${INSTALL_DIR}/${wrapper_name}" "${WRAPPER_SRC}" \
             /DTOOL_NAME="${tool_name}" \
-            /DDEFAULT_TOOL="\"${default_tool}\""
+            "/DDEFAULT_TOOL=${default_tool}"
     else
-        # GCC/MinGW syntax
+        # GCC/clang (zig cc) syntax
         "${_CC[@]}" -O2 -o "${INSTALL_DIR}/${wrapper_name}" "${WRAPPER_SRC}" \
             -DTOOL_NAME="${tool_name}" \
-            -DDEFAULT_TOOL="\"${default_tool}\""
+            "-DDEFAULT_TOOL=${default_tool}"
     fi
 done
 

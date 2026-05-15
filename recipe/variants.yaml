@@ -70,6 +70,7 @@ cross_target_platform_:
   - osx-arm64
   - win-64
   - win-arm64
+  # - win-32
 
 ocaml_compiler:
   - ocaml
@@ -79,4 +80,4 @@ ocaml_compiler_version:
 zig_compiler:
   - zig
 zig_compiler_version:
-  - "0.15.2"
+  - "0.16.0"

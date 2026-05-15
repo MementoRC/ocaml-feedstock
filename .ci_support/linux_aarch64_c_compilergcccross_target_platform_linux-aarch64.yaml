@@ -13,7 +13,7 @@ channel_targets:
 cross_target_platform_:
 - linux-aarch64
 docker_image:
-- quay.io/condaforge/linux-anvil-aarch64:alma9
+- quay.io/condaforge/linux-anvil-aarch64:alma10
 m2w64_c_stdlib:
 - m2w64-sysroot
 m2w64_c_stdlib_version:
@@ -23,6 +23,6 @@ target_platform:
 zig_compiler:
 - zig
 zig_compiler_version:
-- 0.15.2
+- 0.16.0
 zstd:
 - '1.5'

@@ -1,5 +1,5 @@
 c_compiler:
-- vs2022
+- zig
 c_compiler_version:
 - 19
 c_stdlib:
@@ -21,10 +21,10 @@ m2w64_c_stdlib:
 m2w64_c_stdlib_version:
 - 12
 target_platform:
-- win-64
+- win-arm64
 zig_compiler:
 - zig
 zig_compiler_version:
-- 0.15.2
+- 0.16.0
 zstd:
 - '1.5'

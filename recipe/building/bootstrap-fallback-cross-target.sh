@@ -40,12 +40,17 @@ bootstrap_cross_target_from_inline() {
         return 1
     fi
 
-    # CONDA_TOOLCHAIN_BUILD must be set (it identifies the native build-host triplet,
-    # e.g. x86_64-conda-linux-gnu on linux-64 build machines).
+    # CONDA_TOOLCHAIN_BUILD is set by conda's compiler activation on Linux but not on Windows.
+    # Mirror the pattern used in build.sh:5863-5867: default to x86_64-w64-mingw32 for non-unix.
     if [[ -z "${CONDA_TOOLCHAIN_BUILD:-}" ]]; then
-        echo "[bootstrap-fallback] ERROR: CONDA_TOOLCHAIN_BUILD not set."
-        echo "[bootstrap-fallback] Cannot call setup_toolchain for native build-host compiler."
-        return 1
+        if ! is_unix; then
+            CONDA_TOOLCHAIN_BUILD="x86_64-w64-mingw32"
+            echo "[bootstrap-fallback] CONDA_TOOLCHAIN_BUILD defaulted to x86_64-w64-mingw32 (non-unix)"
+        else
+            echo "[bootstrap-fallback] ERROR: CONDA_TOOLCHAIN_BUILD not set on unix build."
+            echo "[bootstrap-fallback] Cannot call setup_toolchain for native build-host compiler."
+            return 1
+        fi
     fi
 
     # Staging dir - distinct from the cross-compiler mode's _xcross_compiler/ dir so both
@@ -105,7 +110,63 @@ bootstrap_cross_target_from_inline() {
     # Transfer the cross-compiler tree.
     if [[ -d "${_staging_dir}/lib/ocaml-cross-compilers" ]]; then
         mkdir -p "${BUILD_PREFIX}/lib"
-        cp -a "${_staging_dir}/lib/ocaml-cross-compilers/." "${BUILD_PREFIX}/lib/ocaml-cross-compilers/"
+        if is_unix; then
+            cp -a "${_staging_dir}/lib/ocaml-cross-compilers/." "${BUILD_PREFIX}/lib/ocaml-cross-compilers/"
+        else
+            # [W7ZZ] round 63: Windows MSYS2 cannot create symbolic links without the
+            # SeCreateSymbolicLink privilege. `cp -a` tried to reproduce the OCaml install
+            # tree's symlinks and died as the FIRST AND ONLY fatal error of round 62:
+            #   cp: cannot create symbolic link
+            #     '.../ocaml-cross-compilers/aarch64-w64-mingw32/bin/ocamldep.exe':
+            #     No such file or directory
+            # (Azure build 1566480 log:24954-24955, immediately after log:24951
+            # "All cross-compilers built successfully" - everything upstream worked.)
+            #
+            # NOT A NEW MECHANISM: bootstrap-fallback-native.sh:153-167 already hit and
+            # solved the identical problem with `cp -rL`, and its comment names the same
+            # cause (symlinks such as ocamlc.exe -> ocamlopt.exe). This mirrors that proven
+            # idiom rather than adding a third way to copy files.
+            #
+            # GUARD SCOPE IS DELIBERATE: this helper is SHARED by every cross target.
+            # linux-s390x (13/13 tests green), ppc64le, aarch64 and riscv64 all transfer
+            # fine with `cp -a`, so the Windows branch must not become the common path.
+            # `is_unix` is the same discriminator the native sibling uses.
+            echo "[W7ZZ-DIAG] non-unix transfer: dereferencing symlinks (cp -rL)"
+            echo "[W7ZZ-DIAG] symlinks in staging tree that will be dereferenced:"
+            find "${_staging_dir}/lib/ocaml-cross-compilers" -type l -printf '  %p -> %l\n' 2>/dev/null | head -40 || true
+
+            # [W8AA] round 64: cp -rL DEREFERENCES symlinks, so a DANGLING symlink is
+            # FATAL ("cp: cannot stat"), which is how round 63 died at
+            # log:23747-23748 (Azure build 1566508):
+            #   cp: cannot stat '.../aarch64-w64-mingw32/bin/ocamldep.exe'
+            #   cp: cannot stat '.../aarch64-w64-mingw32/bin/ocamlobjinfo.exe'
+            # The round-63 find listing showed 6 symlinks: flexlink/ocamlc/ocamllex/
+            # ocamlopt -> *.opt.exe all resolve and copied fine, while ocamldep.exe ->
+            # ocamldep.byte.exe and ocamlobjinfo.exe -> ocamlobjinfo.byte.exe are
+            # DANGLING - the .byte.exe variants are never built for the cross-compiler.
+            # NOT A NEW MECHANISM: build.sh:11991-12003 (v05_03BL) already prunes
+            # dangling symlinks before the tar transfer for exactly this reason, and
+            # its comment names the same cause (installcross makes links whose target
+            # was never built because allopt was skipped). This mirrors that idiom.
+            # Policy matches v05_03BL: DROP the dangling link, do not retarget it.
+            _w8aa_dangling=0
+            while IFS= read -r -d '' _w8aa_lnk; do
+                if [[ ! -e "$_w8aa_lnk" ]]; then
+                    rm -f "$_w8aa_lnk"
+                    _w8aa_dangling=$((_w8aa_dangling+1))
+                fi
+            done < <(find "${_staging_dir}/lib/ocaml-cross-compilers" -type l -print0 2>/dev/null)
+            echo "[W8AA] removed ${_w8aa_dangling} dangling symlinks from ${_staging_dir}/lib/ocaml-cross-compilers"
+
+            cp -rL "${_staging_dir}/lib/ocaml-cross-compilers/." "${BUILD_PREFIX}/lib/ocaml-cross-compilers/"
+
+            # [W8AA-B] round 64 DIAGNOSTIC ONLY: we know two links dangle, but not
+            # whether ocamldep/ocamlobjinfo exist in ANY form. If they are absent
+            # entirely the cross-compiler is incomplete and that will surface later
+            # as a far more confusing error. List what is actually there.
+            echo "[W8AA-B] regular files in cross-compiler bin after transfer:"
+            ls -la "${BUILD_PREFIX}/lib/ocaml-cross-compilers/"*/bin/ 2>/dev/null | head -60 || true
+        fi
     fi
 
     # Transfer ONLY the target-prefixed toolchain wrappers (e.g. s390x-conda-linux-gnu-ocaml-*).
