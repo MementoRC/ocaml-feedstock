@@ -129,8 +129,21 @@ fi
 echo ""
 echo "============================================================"
 echo "OCaml Build Script - Mode Detection"
-echo "  BUILD_SCRIPT_VERSION: 2026-08-12B-W8AC-pkgcontents-winarm64-crosstarget-stub-guards"
+echo "  BUILD_SCRIPT_VERSION: 2026-08-23A-W9U-test-drop-w7cc-kernel32arm-rename"
 echo "============================================================"
+
+# ============================================================================
+# [W9U] 2026-08-23: single-hypothesis test guard, OFF by default. W7CC (build.sh
+# ~6323/~7137) renames the win-arm64 ARM64 kernel32 import stub from
+# libkernel32.a to libkernel32arm.a so it cannot basename-dedup-shadow the real
+# x86_64 libkernel32.a during the x86_64 flexlink.exe HOST self-relink. zig
+# 0.16.0 build 12+ now stages arm64 import libs in a separate libarm64/ dir
+# from x86_64's lib-common/, so the collision W7CC worked around may no longer
+# occur. Set to 1 to skip the W7CC rename and its consumers, restoring the
+# pre-W7CC libkernel32.a basename/path, to test whether the rename is still
+# load-bearing. Unset/0 = today's behaviour (W7CC rename active), unchanged.
+# ============================================================================
+W9U_DISABLE_W7CC_RENAME=1
 
 # ============================================================================
 # W4AC diagnostic: dump environment using env|grep — NO parameter expansion
@@ -6320,7 +6333,11 @@ SHLWAPIDEF
       # kernel32.dll - ARM64 import stub for core Win32 APIs used by OCaml runtime.
       # zig lib-common ships an x64 libkernel32.a; flexlink -chain mingw64arm resolves
       # -lkernel32 from there, causing arch-conflict at link time. Provide our own.
-      _kernel32_lib="${_arm64_lib_dir}/libkernel32arm.a"  # W7CC: off the libkernel32.a basename so the x86_64 flexlink.exe self-build's -lkernel32 cannot bind this arm64 stub (basename-dedup shadow). The arm64 OUTPUT link references it by absolute path (_imp_kernel32) so it is unaffected.
+      if [[ "${W9U_DISABLE_W7CC_RENAME:-0}" == "1" ]]; then
+        _kernel32_lib="${_arm64_lib_dir}/libkernel32.a"  # W9U: W7CC rename disabled this round (see guard near top of file)
+      else
+        _kernel32_lib="${_arm64_lib_dir}/libkernel32arm.a"  # W7CC: off the libkernel32.a basename so the x86_64 flexlink.exe self-build's -lkernel32 cannot bind this arm64 stub (basename-dedup shadow). The arm64 OUTPUT link references it by absolute path (_imp_kernel32) so it is unaffected.
+      fi
       if [[ ! -f "${_kernel32_lib}" ]]; then
         cat > "${_arm64_lib_dir}/kernel32.def" << 'KERNEL32DEF'
 LIBRARY "KERNEL32.dll"
@@ -6448,7 +6465,11 @@ KERNEL32DEF
                 ${_zig_exe} dlltool -m arm64 -d "${_def}" -l "${_lib}" -D "${_dll}" 2>/dev/null || true
                 ;;
         esac
-        [[ -f "${_kernel32_lib}" ]] && echo "  Created libkernel32arm.a (ARM64 import stub, $(wc -c < "${_kernel32_lib}") bytes)" || echo "  WARNING: libkernel32.a NOT created"
+        if [[ "${W9U_DISABLE_W7CC_RENAME:-0}" == "1" ]]; then
+          [[ -f "${_kernel32_lib}" ]] && echo "  Created libkernel32.a (ARM64 import stub, $(wc -c < "${_kernel32_lib}") bytes) [W9U: W7CC rename disabled]" || echo "  WARNING: libkernel32.a NOT created"
+        else
+          [[ -f "${_kernel32_lib}" ]] && echo "  Created libkernel32arm.a (ARM64 import stub, $(wc -c < "${_kernel32_lib}") bytes)" || echo "  WARNING: libkernel32.a NOT created"
+        fi
       fi
 
       # shell32.dll - ARM64 import stub; OCaml runtime barely uses this but flexlink
@@ -7134,7 +7155,11 @@ WS2DEF
       # v05_02k: ARM64-specific import libs for kernel32/shell32/ole32/uuid to replace
       # zig's x64 lib-common stubs (arch-conflict at flexlink link time).
       # W4KK: add advapi32 positional path (ARM64 stub created above).
-      _imp_kernel32="${_pfx_unix}/Library/lib/ocaml-arm64-imports/libkernel32arm.a"  # W7CC: arm64 stub renamed off libkernel32.a basename (see stub gen ~4989); still consumed here as an absolute positional path by the arm64 output link.
+      if [[ "${W9U_DISABLE_W7CC_RENAME:-0}" == "1" ]]; then
+        _imp_kernel32="${_pfx_unix}/Library/lib/ocaml-arm64-imports/libkernel32.a"  # W9U: W7CC rename disabled this round (see guard near top of file)
+      else
+        _imp_kernel32="${_pfx_unix}/Library/lib/ocaml-arm64-imports/libkernel32arm.a"  # W7CC: arm64 stub renamed off libkernel32.a basename (see stub gen ~4989); still consumed here as an absolute positional path by the arm64 output link.
+      fi
       _imp_shell32="${_pfx_unix}/Library/lib/ocaml-arm64-imports/libshell32.a"
       _imp_ole32="${_pfx_unix}/Library/lib/ocaml-arm64-imports/libole32.a"
       _imp_uuid="${_pfx_unix}/Library/lib/ocaml-arm64-imports/libuuid.a"
@@ -10599,6 +10624,50 @@ ARSHEOF
           _w33_build_prefix_env=( "BUILD_PREFIX=${_w33_build_prefix_fwd}" )
           echo "  [W33] normalized BUILD_PREFIX backslashes for cross-flexdll sub-make: ${_w33_build_prefix_fwd}"
         fi
+
+        # ====================================================================
+        # [W9U] 2026-08-23 DIAGNOSTIC (unconditional; fires on both success and
+        # failure paths since it runs before the crossopt invocation below, which
+        # drives Makefile.cross's HOST x86_64 flexlink.exe self-relink -- the
+        # exact site W7CC's libkernel32.a -> libkernel32arm.a rename targets.
+        # Companion to the W9U_DISABLE_W7CC_RENAME guard (near top of file).
+        # ====================================================================
+        echo "[W9U-DIAG] W9U_DISABLE_W7CC_RENAME=${W9U_DISABLE_W7CC_RENAME:-0} (1 = W7CC rename skipped this round)"
+        echo "[W9U-DIAG] -L directories on FLEXLINKFLAGS:"
+        read -ra _w9u_flags <<< "${FLEXLINKFLAGS:-}"
+        for _w9u_tok in "${_w9u_flags[@]}"; do
+          case "${_w9u_tok}" in
+            -L*) echo "  [W9U-DIAG]   ${_w9u_tok#-L}" ;;
+          esac
+        done
+        echo "[W9U-DIAG] locating libkernel32.a / libkernel32arm.a on that search path (first -L hit wins under basename-dedup):"
+        _w9u_winner=""
+        for _w9u_tok in "${_w9u_flags[@]}"; do
+          case "${_w9u_tok}" in
+            -L*)
+              _w9u_dir="${_w9u_tok#-L}"
+              for _w9u_name in libkernel32.a libkernel32arm.a; do
+                if [[ -f "${_w9u_dir}/${_w9u_name}" ]]; then
+                  echo "  [W9U-DIAG]   FOUND ${_w9u_dir}/${_w9u_name} ($(wc -c < "${_w9u_dir}/${_w9u_name}" 2>/dev/null || echo '?') bytes)"
+                  [[ -z "${_w9u_winner}" ]] && _w9u_winner="${_w9u_dir}/${_w9u_name}"
+                fi
+              done
+              ;;
+          esac
+        done
+        if [[ -n "${_w9u_winner}" ]]; then
+          echo "  [W9U-DIAG] WINNER: ${_w9u_winner}"
+          if command -v file >/dev/null 2>&1; then
+            echo "  [W9U-DIAG] file(1): $(file "${_w9u_winner}" 2>/dev/null || echo 'file failed')"
+          elif command -v llvm-objdump >/dev/null 2>&1; then
+            echo "  [W9U-DIAG] llvm-objdump -f: $(llvm-objdump -f "${_w9u_winner}" 2>/dev/null | grep -i architecture || echo 'objdump failed')"
+          else
+            echo "  [W9U-DIAG] no file/llvm-objdump on PATH; skipping machine-type probe"
+          fi
+        else
+          echo "  [W9U-DIAG] WINNER: none found on any -L directory"
+        fi
+
         _crossopt_rc=0
         run_logged "crossopt" timeout --kill-after=120 "${_crossopt_timeout_s}" env "PATH=${_v05_03AS_dir}${_v05_03AS_dir:+:}${BUILD_PREFIX}/Library/bin:${PATH}" "OCAML_FLEXLINK=${_v05_03j_flexlink}" ${_w31_flexdll_env[@]+"${_w31_flexdll_env[@]}"} ${_w33_build_prefix_env[@]+"${_w33_build_prefix_env[@]}"} "${MAKE[@]}" crossopt "${CROSSOPT_ARGS[@]}" -j"${_ocaml_make_jobs}" || _crossopt_rc=$?
         # ====================================================================

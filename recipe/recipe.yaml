@@ -312,10 +312,6 @@ outputs:
             - if: c_compiler == "zig"
               then:
                 - ${{ compiler("zig") }}
-                # REMOVE THIS PIN once zig_win-arm64 ships a working build.
-                - if: target_platform == "win-arm64"
-                  then:
-                    - zig_win-arm64 ==0.16.0 *_9
                 # - ${{ c_compiler }}_${{ build_platform }} ${{ actual_c_compiler_version }}*
               else:
                 - ${{ compiler("m2w64_c") }}
