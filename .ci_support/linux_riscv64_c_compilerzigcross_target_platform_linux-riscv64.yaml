@@ -1,9 +1,5 @@
 c_compiler:
 - zig
-c_compiler_version:
-- '14'
-c_stdlib:
-- sysroot
 c_stdlib_version:
 - '2.17'
 channel_sources:
@@ -14,10 +10,6 @@ cross_target_platform_:
 - linux-riscv64
 docker_image:
 - quay.io/condaforge/linux-anvil-x86_64:alma10
-m2w64_c_stdlib:
-- m2w64-sysroot
-m2w64_c_stdlib_version:
-- 12
 target_platform:
 - linux-riscv64
 zig_compiler:

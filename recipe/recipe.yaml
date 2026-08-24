@@ -312,9 +312,41 @@ outputs:
             - if: c_compiler == "zig"
               then:
                 - ${{ compiler("zig") }}
+                # --- TEMPORARY BUILD PIN ZIG13 (2026-08-23) ---
+                # Pin zig to build 13 of 0.16.0.
+                # WHY A BUILD-LEVEL PIN: builds 12 and 13 are both version
+                # 0.16.0, so no variants.yaml key or version constraint can
+                # discriminate them; only a `name version build` matchspec can.
+                # WHY A GLOB not an exact hash: each zig_<target> package has
+                # its OWN build hash for the same build number (zig_win-64
+                # build 13 is h8d2ca87_13), so an exact string cannot be used
+                # with a templated zig_${{ target_platform }} line.
+                # `*_13` matches the build number across all targets; the
+                # `0.16.0` version token keeps it off the 0.15.2 builds that
+                # also end in _13.
+                # WHAT BUILD 13 BRINGS: crt2win.o (GUI/WinMain path), on top
+                # of build 12's separate libarm64/ vs lib-common/ import
+                # staging.
+                # TEMPORARY: this pin is for evaluating build 13 and should be
+                # revisited, not left indefinitely.
+                - zig_${{ target_platform }} ==0.16.0 *_13
                 # - ${{ c_compiler }}_${{ build_platform }} ${{ actual_c_compiler_version }}*
               else:
                 - ${{ compiler("m2w64_c") }}
+                # --- TEMPORARY BUILD PIN 2026-08-23 (REMOVE WHEN UPSTREAM FIXED) ---
+                # gcc_win-64 build hd2d5470_1 (published 2026-08-19, version
+                # 14.4.0 - same version as the known-good hd2d5470_0 build, so
+                # m2w64_c_compiler_version alone cannot exclude it) ships an
+                # x86_64-w64-mingw32-gcc.exe that ABORTS with
+                # "*** stack smashing detected ***" on invocation, breaking this
+                # win-64 gcc lane (green on 2026-08-13, broken once _1 became
+                # latest). Pin the exact build string of the last known-good
+                # build here since neither variants.yaml nor a
+                # conda_build_config.yaml key can express a build-string-exact
+                # constraint through the compiler() macro (it only wildcards
+                # the version). Remove this line once conda-forge ships a
+                # fixed gcc_win-64 build and re-verify the lane goes green.
+                - gcc_win-64 ==14.4.0 hd2d5470_0
                 - ${{ stdlib("m2w64_c") }}
           else:
             - ${{ compiler("c") }}
@@ -421,7 +453,32 @@ outputs:
               then:
                 - if: c_compiler == "zig"
                   then:
-                    - ${{ compiler("zig") }}
+                    # W10A (2026-08-23): win-arm64 run-dep escape hatch.
+                    # win-arm64 packages are produced ONLY by the zig lane
+                    # (skip_vs above disables any vs2022 x win-arm64 variant),
+                    # so compiler("zig") expands to zig_win-arm64 -- a package
+                    # hosted ONLY on the win-64 subdir. That is correct for the
+                    # is_cross_compiler output (which ships on win-64 and is
+                    # already excluded by the enclosing guard), but the
+                    # is_native / is_cross_target outputs SHIP ON the win-arm64
+                    # subdir, where that spec has ZERO candidates and the test
+                    # env fails to solve. The failing lane is the NATIVE
+                    # win_arm64 runner, so this must NOT be narrowed to
+                    # is_cross_target. vs2022_win-arm64 is the only C compiler
+                    # hosted on the win-arm64 subdir, so declare it literally.
+                    # SOLVE-LEVEL FIX ONLY: the shipped ocamlopt was configured
+                    # for aarch64-w64-mingw32 + flexdll mingw64arm, so MSVC is
+                    # not a drop-in replacement for the toolchain it expects.
+                    # TEMPORARY: remove if a real vs2022 win-arm64 build lane is
+                    # enabled (by narrowing skip_vs), or if zig_win-arm64 is
+                    # ever published on the win-arm64 subdir.
+                    - if: xc_warm64
+                      then:
+                        - vs2022_win-arm64
+                      else:
+                        - ${{ compiler("zig") }}
+                        # ZIG13 pin, see :314
+                        - zig_${{ target_platform }} ==0.16.0 *_13
                   else:
                     - ${{ compiler("m2w64_c") }}
               else:
@@ -447,7 +504,8 @@ outputs:
               then:
                 - if: c_compiler == "zig"
                   then:
-                    - zig_${{ cross_target_platform_ }} >=${{ actual_c_compiler_version }}
+                    # ZIG13 pin, see :314
+                    - zig_${{ cross_target_platform_ }} ==0.16.0 *_13
                   else:
                     - gcc_impl_${{ cross_target_platform_ }} >=${{ actual_c_compiler_version }}
                     - binutils_impl_${{ cross_target_platform_ }}
@@ -801,6 +859,8 @@ outputs:
         - if: c_compiler == "zig"
           then:
             - ${{ compiler("zig") }}
+            # ZIG13 pin, see :314
+            - zig_${{ target_platform }} ==0.16.0 *_13
     tests:
       # ----------------------------------------------------------------------
       # Package contents (metapackage - only test files)
@@ -1172,6 +1232,8 @@ outputs:
             - if: c_compiler == "zig"
               then:
                 - ${{ compiler("zig") }}
+                # ZIG13 pin, see :314
+                - zig_${{ target_platform }} ==0.16.0 *_13
             - pefile
 
       # ----------------------------------------------------------------------
@@ -1196,6 +1258,8 @@ outputs:
             - if: c_compiler == "zig"
               then:
                 - ${{ compiler("zig") }}
+                # ZIG13 pin, see :314
+                - zig_${{ target_platform }} ==0.16.0 *_13
 
   # ==========================================================================
   # DEVELOPMENT META-PACKAGE: ocaml-devel

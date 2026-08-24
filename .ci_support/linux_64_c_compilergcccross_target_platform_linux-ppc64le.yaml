@@ -14,10 +14,6 @@ cross_target_platform_:
 - linux-ppc64le
 docker_image:
 - quay.io/condaforge/linux-anvil-x86_64:alma10
-m2w64_c_stdlib:
-- m2w64-sysroot
-m2w64_c_stdlib_version:
-- 12
 target_platform:
 - linux-64
 zig_compiler:

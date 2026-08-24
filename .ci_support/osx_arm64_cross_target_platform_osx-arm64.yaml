@@ -16,17 +16,9 @@ channel_targets:
 - conda-forge main
 cross_target_platform_:
 - osx-arm64
-m2w64_c_stdlib:
-- m2w64-sysroot
-m2w64_c_stdlib_version:
-- 12
 macos_machine:
 - arm64-apple-darwin20.0.0
 target_platform:
 - osx-arm64
-zig_compiler:
-- zig
-zig_compiler_version:
-- 0.16.0
 zstd:
 - '1.5'

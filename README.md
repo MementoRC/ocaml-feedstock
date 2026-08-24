@@ -1,7 +1,7 @@
 About ocaml_osx-64-feedstock
 ============================
 
-Feedstock license: [BSD-3-Clause](https://github.com/conda-forge/ocaml-feedstock-5.4.0-altc-feedstock/blob/main/LICENSE.txt)
+Feedstock license: [BSD-3-Clause](https://github.com/conda-forge/ocaml-feedstock-5.4.0-feedstock/blob/main/LICENSE.txt)
 
 Home: https://ocaml.org/
 
@@ -37,8 +37,8 @@ Current build status
 <table><tr>
     <td>GitHub Actions</td>
     <td>
-      <a href="https://github.com/conda-forge/ocaml-feedstock-5.4.0-altc-feedstock/actions/workflows/conda-build.yml">
-        <img src="https://github.com/conda-forge/ocaml-feedstock-5.4.0-altc-feedstock/actions/workflows/conda-build.yml/badge.svg?event=push&branch=main">
+      <a href="https://github.com/conda-forge/ocaml-feedstock-5.4.0-feedstock/actions/workflows/conda-build.yml">
+        <img src="https://github.com/conda-forge/ocaml-feedstock-5.4.0-feedstock/actions/workflows/conda-build.yml/badge.svg?event=push&branch=main">
       </a>
     </td>
   </tr>
@@ -49,7 +49,7 @@ Current build status
       <details>
         <summary>
           <a href="https://dev.azure.com/conda-forge/feedstock-builds/_build/latest?definitionId=None&branchName=main">
-            <img src="https://dev.azure.com/conda-forge/feedstock-builds/_apis/build/status/ocaml-feedstock-5.4.0-altc-feedstock?branchName=main">
+            <img src="https://dev.azure.com/conda-forge/feedstock-builds/_apis/build/status/ocaml-feedstock-5.4.0-feedstock?branchName=main">
           </a>
         </summary>
         <table>
@@ -58,42 +58,14 @@ Current build status
               <td>osx_64_cross_target_platform_osx-64</td>
               <td>
                 <a href="https://dev.azure.com/conda-forge/feedstock-builds/_build/latest?definitionId=None&branchName=main">
-                  <img src="https://dev.azure.com/conda-forge/feedstock-builds/_apis/build/status/ocaml-feedstock-5.4.0-altc-feedstock?branchName=main&jobName=osx&configuration=osx%20osx_64_cross_target_platform_osx-64" alt="variant">
+                  <img src="https://dev.azure.com/conda-forge/feedstock-builds/_apis/build/status/ocaml-feedstock-5.4.0-feedstock?branchName=main&jobName=osx&configuration=osx%20osx_64_cross_target_platform_osx-64" alt="variant">
                 </a>
               </td>
             </tr><tr>
               <td>osx_arm64_cross_target_platform_osx-arm64</td>
               <td>
                 <a href="https://dev.azure.com/conda-forge/feedstock-builds/_build/latest?definitionId=None&branchName=main">
-                  <img src="https://dev.azure.com/conda-forge/feedstock-builds/_apis/build/status/ocaml-feedstock-5.4.0-altc-feedstock?branchName=main&jobName=osx&configuration=osx%20osx_arm64_cross_target_platform_osx-arm64" alt="variant">
-                </a>
-              </td>
-            </tr><tr>
-              <td>win_64_c_compilergcccross_target_platform_win-64</td>
-              <td>
-                <a href="https://dev.azure.com/conda-forge/feedstock-builds/_build/latest?definitionId=None&branchName=main">
-                  <img src="https://dev.azure.com/conda-forge/feedstock-builds/_apis/build/status/ocaml-feedstock-5.4.0-altc-feedstock?branchName=main&jobName=win&configuration=win%20win_64_c_compilergcccross_target_platform_win-64" alt="variant">
-                </a>
-              </td>
-            </tr><tr>
-              <td>win_64_c_compilervs2022cross_target_platform_win-64</td>
-              <td>
-                <a href="https://dev.azure.com/conda-forge/feedstock-builds/_build/latest?definitionId=None&branchName=main">
-                  <img src="https://dev.azure.com/conda-forge/feedstock-builds/_apis/build/status/ocaml-feedstock-5.4.0-altc-feedstock?branchName=main&jobName=win&configuration=win%20win_64_c_compilervs2022cross_target_platform_win-64" alt="variant">
-                </a>
-              </td>
-            </tr><tr>
-              <td>win_64_c_compilerzigcross_target_platform_win-64</td>
-              <td>
-                <a href="https://dev.azure.com/conda-forge/feedstock-builds/_build/latest?definitionId=None&branchName=main">
-                  <img src="https://dev.azure.com/conda-forge/feedstock-builds/_apis/build/status/ocaml-feedstock-5.4.0-altc-feedstock?branchName=main&jobName=win&configuration=win%20win_64_c_compilerzigcross_target_platform_win-64" alt="variant">
-                </a>
-              </td>
-            </tr><tr>
-              <td>win_64_c_compilerzigcross_target_platform_win-arm64</td>
-              <td>
-                <a href="https://dev.azure.com/conda-forge/feedstock-builds/_build/latest?definitionId=None&branchName=main">
-                  <img src="https://dev.azure.com/conda-forge/feedstock-builds/_apis/build/status/ocaml-feedstock-5.4.0-altc-feedstock?branchName=main&jobName=win&configuration=win%20win_64_c_compilerzigcross_target_platform_win-arm64" alt="variant">
+                  <img src="https://dev.azure.com/conda-forge/feedstock-builds/_apis/build/status/ocaml-feedstock-5.4.0-feedstock?branchName=main&jobName=osx&configuration=osx%20osx_arm64_cross_target_platform_osx-arm64" alt="variant">
                 </a>
               </td>
             </tr>
@@ -130,31 +102,73 @@ conda config --add channels conda-forge
 conda config --set channel_priority strict
 ```
 
-Once the `conda-forge` channel has been enabled, `ocaml-compiler, ocaml_linux-64, ocaml_linux-aarch64, ocaml_linux-ppc64le, ocaml_linux-riscv64, ocaml_linux-s390x, ocaml_osx-64, ocaml_osx-arm64, ocaml_win-64, ocaml_win-arm64` can be installed with `conda`:
+How to use
+----------
+
+<details>
+<summary>With conda</summary>
 
 ```
 conda install ocaml-compiler ocaml_linux-64 ocaml_linux-aarch64 ocaml_linux-ppc64le ocaml_linux-riscv64 ocaml_linux-s390x ocaml_osx-64 ocaml_osx-arm64 ocaml_win-64 ocaml_win-arm64
 ```
 
-or with `mamba`:
+</details>
+
+<details>
+<summary>With mamba</summary>
 
 ```
 mamba install ocaml-compiler ocaml_linux-64 ocaml_linux-aarch64 ocaml_linux-ppc64le ocaml_linux-riscv64 ocaml_linux-s390x ocaml_osx-64 ocaml_osx-arm64 ocaml_win-64 ocaml_win-arm64
 ```
 
-It is possible to list all of the versions of `ocaml-compiler` available on your platform with `conda`:
+</details>
+
+<details>
+<summary>With pixi</summary>
+
+```
+# for adding to your local project
+pixi add ocaml-compiler ocaml_linux-64 ocaml_linux-aarch64 ocaml_linux-ppc64le ocaml_linux-riscv64 ocaml_linux-s390x ocaml_osx-64 ocaml_osx-arm64 ocaml_win-64 ocaml_win-arm64
+# for installing globally
+pixi global install ocaml-compiler ocaml_linux-64 ocaml_linux-aarch64 ocaml_linux-ppc64le ocaml_linux-riscv64 ocaml_linux-s390x ocaml_osx-64 ocaml_osx-arm64 ocaml_win-64 ocaml_win-arm64
+```
+
+</details>
+
+Search package versions
+-----------------------
+
+It is possible to list all of the versions of `ocaml-compiler` available on your platform:
+
+<details>
+<summary>With conda</summary>
 
 ```
 conda search ocaml-compiler --channel conda-forge
 ```
 
-or with `mamba`:
+</details>
+
+<details>
+<summary>With mamba</summary>
 
 ```
 mamba search ocaml-compiler --channel conda-forge
 ```
 
-Alternatively, `mamba repoquery` may provide more information:
+</details>
+
+<details>
+<summary>With pixi</summary>
+
+```
+pixi search ocaml-compiler --channel conda-forge
+```
+
+</details>
+
+<details>
+<summary>With mamba repoquery, which may provide more information</summary>
 
 ```
 # Search all versions available on your platform:
@@ -166,6 +180,8 @@ mamba repoquery whoneeds ocaml-compiler --channel conda-forge
 # List dependencies of `ocaml-compiler`:
 mamba repoquery depends ocaml-compiler --channel conda-forge
 ```
+
+</details>
 
 
 About conda-forge

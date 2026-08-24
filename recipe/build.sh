@@ -129,7 +129,7 @@ fi
 echo ""
 echo "============================================================"
 echo "OCaml Build Script - Mode Detection"
-echo "  BUILD_SCRIPT_VERSION: 2026-08-23A-W9U-test-drop-w7cc-kernel32arm-rename"
+echo "  BUILD_SCRIPT_VERSION: 2026-08-28A-m2w64-14-pin-ZIG13-P1-widen-win64-P2X-P4-markers"
 echo "============================================================"
 
 # ============================================================================
@@ -983,6 +983,19 @@ stage_x86_64_imports() {
         libgcc.a libgcc_eh.a libmoldname.a
         libadvapi32.a libuser32.a libshell32.a
     )
+    # ZIG13-P1 (2026-08-28): win-64 package test links libasmrun.lib and fails with
+    # unresolved WaitOnAddress/WakeByAddressAll (synchronization), GetFileVersionInfoSizeW/
+    # GetFileVersionInfoW/VerQueryValueW (version), CoTaskMemFree (ole32), PathIsPrefixW
+    # (shlwapi) - those libs were absent from the allowlist above so never verified/repaired.
+    # Guarded to win-64 only (feedback_shared_helper_scope, most-restrictive-guard rule);
+    # win-arm64 already sources these via the W7DD dlltool-regen path below and must not be
+    # widened here since the failure is only observed on win-64.
+    if [[ "${OCAML_TARGET_PLATFORM:-}" == "win-64" ]]; then
+        _real_lib_names+=(
+            libole32.a libuuid.a libversion.a libshlwapi.a libsynchronization.a
+        )
+        echo "  [ZIG13-P1] win-64: extended _real_lib_names with ole32/uuid/version/shlwapi/synchronization"
+    fi
     for _libname in "${_real_lib_names[@]}"; do
         _shipped_ok=""
         # W2UU: build candidate-name list; libmsvcrt.a also probes libmsvcrt-os.a
@@ -1001,9 +1014,22 @@ stage_x86_64_imports() {
                         if command -v llvm-nm >/dev/null 2>&1 || command -v nm >/dev/null 2>&1; then
                             _nm="$(command -v llvm-nm 2>/dev/null || command -v nm 2>/dev/null)"
                             case "${_libname}" in
+                                libole32.a|libuuid.a|libversion.a|libshlwapi.a|libsynchronization.a)
+                                    # ZIG13-P1 (2026-08-28): same i386-vs-x86_64 decoration check as
+                                    # the group below, but keyed on the exact symbols the win-64
+                                    # package-test link needs from these libs. Without this the new
+                                    # allowlist entries would be copied unverified, reintroducing the
+                                    # W2SS/W2TT wrong-arch-copy defect for a fresh set of libs.
+                                    if ! "${_nm}" "${_spath}/${_cname}" 2>/dev/null | grep -qE ' (T|I|D|R) _?(CoTaskMemFree|CoCreateInstance|PathIsPrefixW|PathFileExistsW|VerQueryValueW|GetFileVersionInfoSizeW|WaitOnAddress|WakeByAddressAll|IID_IUnknown)$'; then
+                                        echo "  [W2TT] WARN: ${_cname} from ${_spath} lacks undecorated x86_64 symbols (likely i386 stdcall @N); skipping"
+                                        echo "[ZIG13-P1] lib=${_libname} matched_path=${_spath} action=skipped-verify-failed" || true
+                                        _arch_verify_ok="no"
+                                    fi
+                                    ;;
                                 libws2_32.a|libucrt.a|libucrtbase.a|libkernel32.a|libmsvcrt.a|libadvapi32.a|libuser32.a|libshell32.a)
                                     if ! "${_nm}" "${_spath}/${_cname}" 2>/dev/null | grep -qE ' (T|I|D|R) _?(recv|WSAGetLastError|GetLastError|HeapAlloc|wcslen|memcpy|malloc|free|exit)$'; then
                                         echo "  [W2TT] WARN: ${_cname} from ${_spath} lacks undecorated x86_64 symbols (likely i386 stdcall @N); skipping"
+                                        echo "[ZIG13-P1] lib=${_libname} matched_path=${_spath} action=skipped-verify-failed" || true
                                         _arch_verify_ok="no"
                                     fi
                                     ;;
@@ -1014,6 +1040,7 @@ stage_x86_64_imports() {
                             _rl_bn="${_libname#lib}"; _rl_bn="${_rl_bn%.a}"; _real_lib_copied["${_rl_bn}"]=1
                             echo "[ZIG016 W2VV-REALTRACK] recorded real lib present: ${_rl_bn}"
                             echo "  [W2UU] shipped ${_cname} -> ${_libname} (${_lsize} bytes) from ${_spath}"
+                            echo "[ZIG13-P1] lib=${_libname} matched_path=${_spath} action=copied" || true
                             _shipped_ok="${_spath}"
                             break 2
                         fi
@@ -1023,6 +1050,7 @@ stage_x86_64_imports() {
         done
         if [[ -z "${_shipped_ok}" ]]; then
             echo "  [W2TT] no acceptable real ${_libname} found; keeping prior stub (if any)"
+            echo "[ZIG13-P1] lib=${_libname} matched_path=none action=not-found" || true
         fi
     done
     unset _real_lib_search_paths _real_lib_names _libname _candidate_names _cname _spath _lsize _shipped_ok _arch_verify_ok _nm _rl_bn
@@ -1745,6 +1773,50 @@ CRTHELPERS_X86
 # build_native() - Build native OCaml compiler
 # (formerly building/build-native.sh)
 # ==============================================================================
+
+# [ZIG13-P3] 2026-08-23 DIAGNOSTIC (additive, non-fatal): does zig cc's plain
+# crt2win startup chain resolve WinMain unaided (no stub, no -municode, no
+# -nostartfiles, no -Wl,-u,...)? Skips entirely on non-Windows targets. Never
+# runs the produced binary (host cannot execute Windows/foreign-arch exes).
+# Guarded so it can NEVER fail or abort the build under set -e/-u.
+zig13_p3_probe_crt2win() {
+  local _p3_lane="${1:-unknown}"
+  local _p3_triple=""
+  case "${OCAML_TARGET_PLATFORM:-}" in
+    win-64) _p3_triple="x86_64-windows-gnu" ;;
+    win-arm64) _p3_triple="aarch64-windows-gnu" ;;
+    *) return 0 ;;
+  esac
+  local _p3_zig="${_zig_exe_native:-${_zig_exe:-}}"
+  if [[ -z "${_p3_zig}" ]]; then
+    _p3_zig="$(command -v zig 2>/dev/null || echo "")"
+  fi
+  if [[ -z "${_p3_zig}" ]]; then
+    echo "[ZIG13-P3] lane=${_p3_lane} target=${_p3_triple} link=other-failure detail=zig-not-found"
+    return 0
+  fi
+  local _p3_c="${SRC_DIR:-/tmp}/.zig13_p3_probe.c"
+  local _p3_exe="${SRC_DIR:-/tmp}/.zig13_p3_probe.exe"
+  local _p3_err="" _p3_class="" _p3_detail=""
+  if ! printf 'int main(void){return 0;}\n' > "${_p3_c}" 2>/dev/null; then
+    echo "[ZIG13-P3] lane=${_p3_lane} target=${_p3_triple} link=other-failure detail=tempfile-write-failed"
+    return 0
+  fi
+  if _p3_err="$("${_p3_zig}" cc -target "${_p3_triple}" "${_p3_c}" -o "${_p3_exe}" 2>&1)"; then
+    _p3_class="ok"
+  else
+    if echo "${_p3_err}" | grep -qi 'winmain'; then
+      _p3_class="undefined-WinMain"
+      _p3_detail="$(echo "${_p3_err}" | grep -i winmain | head -1 | cut -c1-120)"
+    else
+      _p3_class="other-failure"
+      _p3_detail="$(echo "${_p3_err}" | head -1 | cut -c1-120)"
+    fi
+  fi
+  echo "[ZIG13-P3] lane=${_p3_lane} target=${_p3_triple} link=${_p3_class} detail=${_p3_detail}"
+  rm -f "${_p3_c}" "${_p3_exe}" 2>/dev/null || true
+  return 0
+}
 
 build_native() {
   local -a CONFIG_ARGS=("${CONFIG_ARGS[@]}")
@@ -3387,6 +3459,10 @@ NOEXT_W7HH7
   if ! is_unix; then
     { echo "[w5r-ar-probe] after-mingw-stubs-native"; ls -la "${BUILD_PREFIX}/Library/bin/"*ar*.exe 2>&1 || echo "[w5r-ar-probe] after-mingw-stubs-native: no *ar*.exe present"; } >&2
   fi
+
+  # [ZIG13-P3] call site: zig compiler vars established above; runs BEFORE any
+  # WinMain stub injection machinery below (W2/W3.../W6 etc). Non-fatal.
+  zig13_p3_probe_crt2win "native" || true
 
   echo "  [3/4] Compiling native compiler"
   # win-64: upstream pattern rule `runtime/%.o: runtime/%.S` is hardcoded with .o extension
@@ -5471,6 +5547,12 @@ print('  '+sys.argv[1].split('/')[-1]+': Machine=0x{:04x}'.format(m))" "${_bin}"
       "${BUILD_PREFIX}/Library/bin/x86_64-w64-mingw32-gcc.exe" --version 2>&1 | head -3 | sed 's/^/  /' || echo "  exec failed exit=$?"
       echo "=== END W3WW DIAGNOSTIC ==="
   fi
+
+  # [ZIG13-P3] cross-lane call site: runs at build_cross_compiler entry, well
+  # BEFORE the CROSS_WINMAIN_STUB_C injection machinery further down (~:9975).
+  # Mirrors the build_native() call site's guard exactly (never fail/abort
+  # under set -e/-u). Non-fatal.
+  zig13_p3_probe_crt2win "cross" || true
 
   # Sanitize CFLAGS unconditionally: cross-compilers fail on x86-specific flags
   # (see top-level Early CFLAGS/LDFLAGS Sanitization block for full rationale)
@@ -10054,6 +10136,59 @@ CROSS_WINMAIN_STUB_C
       # (identical to the one build_native() relies on) still applies.
       stage_x86_64_imports
 
+      # ============================================================================
+      # [ZIG13-P2] 2026-08-23 DIAGNOSTIC (additive, non-fatal): can flexlink read
+      # zig's import libs directly? PREPEND -L for zig's lib-common (x86_64) and
+      # libarm64 dirs AHEAD of the existing staging -L entries added by W5N/W5X
+      # below. Staging -L entries are left exactly as-is (kept as fallback), so
+      # this cannot break the link either way.
+      # ============================================================================
+      _zig13_p2_libcommon="${BUILD_PREFIX}/Library/lib/zig/libc/mingw/lib-common"
+      _zig13_p2_libarm64="${BUILD_PREFIX}/Library/lib/zig/libc/mingw/libarm64"
+      _zig13_p2_prepended="no"
+      _zig13_p2_prepend_flags=""
+      if [[ -d "${_zig13_p2_libcommon}" ]]; then
+        _zig13_p2_prepend_flags="${_zig13_p2_prepend_flags} -L${_zig13_p2_libcommon}"
+        _zig13_p2_prepended="yes"
+      fi
+      if [[ -d "${_zig13_p2_libarm64}" ]]; then
+        _zig13_p2_prepend_flags="${_zig13_p2_prepend_flags} -L${_zig13_p2_libarm64}"
+        _zig13_p2_prepended="yes"
+      fi
+      if [[ -n "${_zig13_p2_prepend_flags}" ]]; then
+        export FLEXLINKFLAGS="${_zig13_p2_prepend_flags# } ${FLEXLINKFLAGS:-}"
+      fi
+      echo "[ZIG13-P2] libcommon=$([[ -d "${_zig13_p2_libcommon}" ]] && echo "${_zig13_p2_libcommon}" || echo MISSING) libarm64=$([[ -d "${_zig13_p2_libarm64}" ]] && echo "${_zig13_p2_libarm64}" || echo MISSING) flexlinkflags_prepended=${_zig13_p2_prepended}" || true
+      echo "[ZIG13-P2X] survived P2, entering P4 block"
+
+      # [ZIG13-P4] 2026-08-23 DIAGNOSTIC: what format are zig's import libs?
+      # Uses llvm-readobj --coff-exports (project convention) NOT nm. Non-fatal.
+      if command -v llvm-readobj >/dev/null 2>&1; then
+        _zig13_p4_lib=""
+        if [[ -f "${_zig13_p2_libcommon}/libkernel32.a" ]]; then
+          _zig13_p4_lib="${_zig13_p2_libcommon}/libkernel32.a"
+        elif [[ -d "${_zig13_p2_libcommon}" ]]; then
+          _zig13_p4_lib="$(find "${_zig13_p2_libcommon}" -maxdepth 1 -name '*.a' 2>/dev/null | head -1)"
+        fi
+        if [[ -n "${_zig13_p4_lib}" ]]; then
+          echo "[ZIG13-P4A] about to run: llvm-readobj --coff-exports ${_zig13_p4_lib}"
+          # Capture unpiped so $? is llvm-readobj's own status, not head's (a pipe would
+          # always report 0 here and defeat the purpose of the P4B marker).
+          _zig13_p4_raw="$(llvm-readobj --coff-exports "${_zig13_p4_lib}" 2>&1)"
+          _zig13_p4_rc=$?
+          echo "[ZIG13-P4B] llvm-readobj exit status=${_zig13_p4_rc}"
+          _zig13_p4_fmt="$(printf '%s\n' "${_zig13_p4_raw}" | head -1)"
+          echo "[ZIG13-P4] lib=${_zig13_p4_lib} readobj=available format=${_zig13_p4_fmt:-<empty>}" || true
+        else
+          echo "[ZIG13-P4A] no lib found in libcommon; skipping llvm-readobj invocation"
+          echo "[ZIG13-P4] lib=none readobj=available format=no-lib-found-in-libcommon" || true
+        fi
+      else
+        echo "[ZIG13-P4A] llvm-readobj not on PATH; skipping invocation"
+        echo "[ZIG13-P4] lib=none readobj=unavailable format=" || true
+      fi
+
+      echo "[ZIG13-P4C] entering W5N block"
       # W5N: the flexdll self-link of flexlink.exe (flexdll/Makefile:191) uses
       # MKEXE=flexlink -chain mingw64arm, which requests mingw64arm libs (incl. -lmoldname)
       # but carries no -L. flexlink reads the FLEXLINKFLAGS env var directly, and it
@@ -10669,7 +10804,9 @@ ARSHEOF
         fi
 
         _crossopt_rc=0
+        echo "[ZIG13-P2-TRACE-BEGIN]" || true
         run_logged "crossopt" timeout --kill-after=120 "${_crossopt_timeout_s}" env "PATH=${_v05_03AS_dir}${_v05_03AS_dir:+:}${BUILD_PREFIX}/Library/bin:${PATH}" "OCAML_FLEXLINK=${_v05_03j_flexlink}" ${_w31_flexdll_env[@]+"${_w31_flexdll_env[@]}"} ${_w33_build_prefix_env[@]+"${_w33_build_prefix_env[@]}"} "${MAKE[@]}" crossopt "${CROSSOPT_ARGS[@]}" -j"${_ocaml_make_jobs}" || _crossopt_rc=$?
+        echo "[ZIG13-P2-TRACE-END]" || true
         # ====================================================================
         # W9B 2026-07-22E DIAGNOSTIC-ONLY (no behaviour change): same probe as
         # the win-64 world.opt leg, for the crossopt (win-arm64) leg. Tests
