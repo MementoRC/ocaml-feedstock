@@ -319,7 +319,7 @@ outputs:
                 # discriminate them; only a `name version build` matchspec can.
                 # WHY A GLOB not an exact hash: each zig_<target> package has
                 # its OWN build hash for the same build number (zig_win-64
-                # build 13 is h8d2ca87_13), so an exact string cannot be used
+                # build 13 is h8d2ca87), so an exact string cannot be used
                 # with a templated zig_${{ target_platform }} line.
                 # `*_13` matches the build number across all targets; the
                 # `0.16.0` version token keeps it off the 0.15.2 builds that
@@ -329,7 +329,7 @@ outputs:
                 # staging.
                 # TEMPORARY: this pin is for evaluating build 13 and should be
                 # revisited, not left indefinitely.
-                - zig_${{ target_platform }} ==0.16.0 *_13
+                - zig_${{ target_platform }} ==0.16.0
                 # - ${{ c_compiler }}_${{ build_platform }} ${{ actual_c_compiler_version }}*
               else:
                 - ${{ compiler("m2w64_c") }}
@@ -478,7 +478,7 @@ outputs:
                       else:
                         - ${{ compiler("zig") }}
                         # ZIG13 pin, see :314
-                        - zig_${{ target_platform }} ==0.16.0 *_13
+                        - zig_${{ target_platform }} ==0.16.0
                   else:
                     - ${{ compiler("m2w64_c") }}
               else:
@@ -505,7 +505,7 @@ outputs:
                 - if: c_compiler == "zig"
                   then:
                     # ZIG13 pin, see :314
-                    - zig_${{ cross_target_platform_ }} ==0.16.0 *_13
+                    - zig_${{ cross_target_platform_ }} ==0.16.0
                   else:
                     - gcc_impl_${{ cross_target_platform_ }} >=${{ actual_c_compiler_version }}
                     - binutils_impl_${{ cross_target_platform_ }}
@@ -858,9 +858,66 @@ outputs:
             - binutils_impl_${{ target_platform }}
         - if: c_compiler == "zig"
           then:
-            - ${{ compiler("zig") }}
-            # ZIG13 pin, see :314
-            - zig_${{ target_platform }} ==0.16.0 *_13
+            # W10B (2026-08-29): win-arm64 run-dep escape hatch for the
+            # ocaml-compiler metapackage. Mirrors W10A at :456-481, which
+            # fixed the identical defect for the ocaml / is_native /
+            # is_cross_target outputs but was never applied here.
+            # compiler("zig") and zig_${{ target_platform }} both expand to
+            # zig_win-arm64, a package hosted ONLY on the win-64 subdir. The
+            # ocaml-compiler output SHIPS ON the win-arm64 subdir, where that
+            # spec has ZERO candidates, so rattler-build's test-env solve
+            # fails with "No candidates were found for zig_win-arm64 0.16.0.*"
+            # (PR97 job 99138600856; the build itself succeeded).
+            # GUARD IS target_platform, NOT xc_warm64: xc_warm64 is
+            # cross_target_platform_ == "win-arm64", which is ALSO true on the
+            # win-64-host cross lane (target_platform == "win-64"). That lane
+            # is green and resolves zig_win-64 correctly; narrowing to
+            # target_platform leaves it untouched. W10A could use xc_warm64
+            # safely only because it sits inside `is_native or is_cross_target`
+            # where cross_target_platform_ == target_platform.
+            # SOLVE-LEVEL FIX ONLY: vs2022_win-arm64 is the only C compiler
+            # hosted on the win-arm64 subdir; the shipped ocamlopt was
+            # configured for aarch64-w64-mingw32 + flexdll mingw64arm, so MSVC
+            # is not a drop-in replacement for the toolchain it expects.
+            # TEMPORARY: remove if zig_win-arm64 is ever published on the
+            # win-arm64 subdir.
+            #
+            # !! THIS IS AN UNBLOCK, NOT A WORKING TOOLCHAIN !!
+            # Declaring a solvable run-dep does NOT make the shipped
+            # win-arm64 ocaml able to compile C stubs. The runtime chain is:
+            #   ocamlopt -> conda-ocaml-cc.exe (baked into
+            #   config.generated.ml at build.sh:2640-2649)
+            #   -> $CONDA_OCAML_CC = "aarch64-w64-mingw32-gcc"
+            #      (scripts/activate.bat:23-25, baked at build.sh:12411/12465)
+            #   -> shipped shim aarch64-w64-mingw32-gcc.bat -- the .exe is
+            #      deleted on arm64 hosts by W3FF (build.sh:3134-3140), so
+            #      only the .bat survives
+            #   -> that .bat hardcodes "${_zig_exe_win}" cc -target
+            #      aarch64-windows-gnu, where _zig_exe_win is an ABSOLUTE
+            #      ${BUILD_PREFIX} path (build.sh:395,410,1923,1931).
+            # ${BUILD_PREFIX} does not exist on a user's machine, and this
+            # .bat is NOT in the recipe.yaml:252-269 prefix_detection list
+            # (conda rewrites $PREFIX placeholders, not $BUILD_PREFIX).
+            # flexlink hits the same shim: "aarch64-w64-mingw32-gcc" is
+            # compiled into Version.mingw64arm by
+            # patches/flexdll-add-mingw64arm-support.patch and shelled out to
+            # for stub-object compilation.
+            # STATUS 2026-08-29: read statically from the recipe, NOT yet
+            # confirmed by executing the shipped package on win-arm64
+            # hardware. Verify before relying on this description.
+            # Real fix requires a runtime C compiler that EXISTS on the
+            # win-arm64 subdir. Constraint: conda-forge has no mingw
+            # toolchain for arm64 (m2w64_c_compiler is bound to
+            # m2w64-sysroot, x86_64 only) and defaults to vs2022 on every
+            # win subdir, while our libasmrun.a is mingw-ABI. Direction
+            # under investigation - do not treat W10B as settled.
+            - if: target_platform == "win-arm64"
+              then:
+                - vs2022_win-arm64
+              else:
+                - ${{ compiler("zig") }}
+                # ZIG13 pin, see :314
+                - zig_${{ target_platform }} ==0.16.0
     tests:
       # ----------------------------------------------------------------------
       # Package contents (metapackage - only test files)
@@ -1229,11 +1286,26 @@ outputs:
             - if: linux
               then:
                 - sysroot_${{ cross_target_platform_ }} ${{ actual_c_stdlib_version }}.*
-            - if: c_compiler == "zig"
+            # W10C (2026-08-30): exclude win-arm64 from the zig TEST requirement.
+            # The test SCRIPT above is already skipped on arm64 (`if: not arm64`
+            # at :1273 -> the else branch just echoes "Skipping compilation
+            # tests"), but this requirements block was NOT gated on arm64, so
+            # rattler-build still had to SOLVE zig_win-arm64 for a script that
+            # never runs. zig_win-arm64 has ZERO files on the win-arm64 subdir
+            # (registry-confirmed: the package exists but every file is
+            # subdir=win-64), so the test-env solve failed with "No candidates
+            # were found for zig_win-arm64 0.16.0.*" -- PR97 job 99188381649,
+            # sha 7b3007a9. W10B at :861-920 fixed the same defect in
+            # requirements.run but did NOT cover these test blocks.
+            # DELIBERATELY NOT substituting vs2022_win-arm64 here (unlike W10B):
+            # the script does not run on this platform, so the correct fix is to
+            # drop the dependency, not to swap in a compiler the test would
+            # never invoke.
+            - if: c_compiler == "zig" and target_platform != "win-arm64"
               then:
                 - ${{ compiler("zig") }}
                 # ZIG13 pin, see :314
-                - zig_${{ target_platform }} ==0.16.0 *_13
+                - zig_${{ target_platform }} ==0.16.0
             - pefile
 
       # ----------------------------------------------------------------------
@@ -1255,11 +1327,13 @@ outputs:
             - if: linux
               then:
                 - sysroot_${{ cross_target_platform_ }} ${{ actual_c_stdlib_version }}.*
-            - if: c_compiler == "zig"
+            # W10C (2026-08-30): same as the block above - test script is
+            # skipped on arm64 (:1301), so do not solve zig_win-arm64 here.
+            - if: c_compiler == "zig" and target_platform != "win-arm64"
               then:
                 - ${{ compiler("zig") }}
                 # ZIG13 pin, see :314
-                - zig_${{ target_platform }} ==0.16.0 *_13
+                - zig_${{ target_platform }} ==0.16.0
 
   # ==========================================================================
   # DEVELOPMENT META-PACKAGE: ocaml-devel

@@ -129,7 +129,7 @@ fi
 echo ""
 echo "============================================================"
 echo "OCaml Build Script - Mode Detection"
-echo "  BUILD_SCRIPT_VERSION: 2026-08-28A-m2w64-14-pin-ZIG13-P1-widen-win64-P2X-P4-markers"
+echo "  BUILD_SCRIPT_VERSION: 2026-08-30A-W11A-zig-exec-probe-build14-sigill"
 echo "============================================================"
 
 # ============================================================================
@@ -2325,6 +2325,40 @@ NOEXT_EOF
   else
     # Non-unix: Build wrapper .exe files BEFORE configuring
     # These need to exist when config.generated.ml references them
+    # -------------------------------------------------------------
+    # W11A (2026-08-30): zig executability probe. DIAGNOSTIC ONLY.
+    # The NATIVE win-arm64 lane dies with SIGILL (exit 132) on the
+    # FIRST build-wrappers.sh compile (PR97 job 99287239325, sha
+    # 250a00dc) after zig moved from build 13 to build 14.
+    # zig_win-arm64 publishes ONLY win-64-subdir files, so on an
+    # arm64 host that binary runs under Windows-on-ARM x64 emulation.
+    # This probe separates "the zig binary cannot execute here at
+    # all" from "only this particular cc invocation faults".
+    # Exit statuses are captured UNPIPED on purpose: piping into
+    # head would take SIGPIPE under `set -o pipefail` (build.sh:2)
+    # and abort the build - the exact defect fixed in ZIG13-P4.
+    echo "[W11A-1] NATIVE_CC=${NATIVE_CC:-<unset>}"
+    echo "[W11A-2] _zig_exe_shim=${_zig_exe_shim:-<unset>}"
+    if [[ -n "${_zig_exe_shim:-}" ]]; then
+        set +e
+        _w11a_ver_raw="$("${_zig_exe_shim}" version 2>&1)"
+        _w11a_ver_rc=$?
+        set -e
+        echo "[W11A-3] zig version rc=${_w11a_ver_rc} first-line=${_w11a_ver_raw%%$'\n'*}"
+        if command -v llvm-readobj >/dev/null 2>&1; then
+            set +e
+            _w11a_hdr_raw="$(llvm-readobj --file-headers "${_zig_exe_shim}" 2>&1)"
+            _w11a_hdr_rc=$?
+            set -e
+            echo "[W11A-4] llvm-readobj --file-headers rc=${_w11a_hdr_rc}"
+            echo "${_w11a_hdr_raw}" | grep -i -E 'Machine|Format|Arch' || true
+        else
+            echo "[W11A-4] llvm-readobj not on PATH; skipping PE header dump"
+        fi
+    else
+        echo "[W11A-3] _zig_exe_shim empty; skipping zig exec probe"
+    fi
+    echo "[W11A-5] entering build-wrappers.sh"
     CC="${NATIVE_CC}" "${RECIPE_DIR}/building/build-wrappers.sh" "${BUILD_PREFIX}/Library/bin"
     _w3zz_cascade_wrappers "${BUILD_PREFIX}/Library/bin"
     # W3FF 2026-06-04: post-cascade purge — if _w3zz_strategy_a/b produced or left an
@@ -10168,7 +10202,11 @@ CROSS_WINMAIN_STUB_C
         if [[ -f "${_zig13_p2_libcommon}/libkernel32.a" ]]; then
           _zig13_p4_lib="${_zig13_p2_libcommon}/libkernel32.a"
         elif [[ -d "${_zig13_p2_libcommon}" ]]; then
-          _zig13_p4_lib="$(find "${_zig13_p2_libcommon}" -maxdepth 1 -name '*.a' 2>/dev/null | head -1)"
+          # No find|head pipe (SIGPIPE + pipefail would abort the build - see EDIT 1).
+          _zig13_p4_glob=( "${_zig13_p2_libcommon}"/*.a )
+          if [[ -e "${_zig13_p4_glob[0]}" ]]; then
+            _zig13_p4_lib="${_zig13_p4_glob[0]}"
+          fi
         fi
         if [[ -n "${_zig13_p4_lib}" ]]; then
           echo "[ZIG13-P4A] about to run: llvm-readobj --coff-exports ${_zig13_p4_lib}"
@@ -10177,7 +10215,9 @@ CROSS_WINMAIN_STUB_C
           _zig13_p4_raw="$(llvm-readobj --coff-exports "${_zig13_p4_lib}" 2>&1)"
           _zig13_p4_rc=$?
           echo "[ZIG13-P4B] llvm-readobj exit status=${_zig13_p4_rc}"
-          _zig13_p4_fmt="$(printf '%s\n' "${_zig13_p4_raw}" | head -1)"
+          # No pipe: `... | head -1` takes SIGPIPE under `set -o pipefail` (build.sh:2) and
+          # aborts the build. Pure parameter expansion gets the first line with no subprocess.
+          _zig13_p4_fmt="${_zig13_p4_raw%%$'\n'*}"
           echo "[ZIG13-P4] lib=${_zig13_p4_lib} readobj=available format=${_zig13_p4_fmt:-<empty>}" || true
         else
           echo "[ZIG13-P4A] no lib found in libcommon; skipping llvm-readobj invocation"
