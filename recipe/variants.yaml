@@ -1,0 +1,20 @@
+c_compiler:
+  - if: not unix
+    then:
+      - vs2022
+      - gcc
+
+# conda-forge ships no sysroot 2.17 for riscv64; it needs 2.39.
+c_stdlib_version:
+  - if: linux and not (aarch64 or ppc64le or x86_64)
+    then:
+      - "2.39"
+
+cross_target_platform_:
+  - linux-64
+  - linux-aarch64
+  - linux-ppc64le
+  - linux-riscv64
+  - osx-64
+  - osx-arm64
+  - win-64

@@ -117,6 +117,7 @@ get_target_id() {
   case "${target}" in
     aarch64-conda-linux-gnu) echo "AARCH64" ;;
     powerpc64le-conda-linux-gnu) echo "PPC64LE" ;;
+    riscv64-conda-linux-gnu) echo "RISCV64" ;;
     arm64-apple-darwin*) echo "ARM64" ;;
     x86_64-conda-linux-gnu|x86_64-apple-darwin*) echo "X86_64" ;;
     *) echo "${target}" | cut -d'-' -f1 | tr '[:lower:]' '[:upper:]' ;;
@@ -131,6 +132,7 @@ get_target_arch() {
   case "${target}" in
     aarch64-*|arm64-*) echo "arm64" ;;
     powerpc64le-*) echo "power" ;;
+    riscv64-*) echo "riscv" ;;
     x86_64-*|*-x86_64-*) echo "amd64" ;;
     *) echo "amd64" ;;  # default
   esac
@@ -145,6 +147,7 @@ get_target_platform() {
     aarch64-*) echo "linux-aarch64" ;;
     arm64-*) echo "osx-arm64" ;;
     powerpc64le-*) echo "linux-ppc64le" ;;
+    riscv64-*) echo "linux-riscv64" ;;
     x86_64-conda-linux-gnu) echo "linux-64" ;;
     x86_64-apple-darwin*) echo "osx-64" ;;
     *) echo "amd64" ;;  # default
@@ -372,6 +375,16 @@ setup_cflags_ldflags() {
       export "${name}_CFLAGS=-ftree-vectorize -fPIC -fstack-protector-strong -O2 -pipe -isystem ${PREFIX}/include"
       export "${name}_LDFLAGS=-Wl,-O2 -Wl,--as-needed -Wl,-z,relro -Wl,-z,now -L${PREFIX}/lib"
       ;;
+    CROSS_linux-64_linux-riscv64)
+      # Cross-compiling FOR Linux riscv64. Same clean generic CFLAGS as
+      # aarch64/ppc64le, but riscv64 needs conda-forge's own linker policy:
+      # activate-gcc_linux-riscv64.sh enables -Wl,--allow-shlib-undefined and
+      # omits --disable-new-dtags/--gc-sections, unlike linux-64. Without
+      # --allow-shlib-undefined the link of ocamlc.opt/ocamlopt.opt fails on
+      # pthread_create@GLIBC_2.34 / pthread_join@GLIBC_2.34 (referenced by libzstd.so).
+      export "${name}_CFLAGS=-ftree-vectorize -fPIC -fstack-protector-strong -O2 -pipe -isystem ${PREFIX}/include"
+      export "${name}_LDFLAGS=-Wl,-O2 -Wl,--sort-common -Wl,--as-needed -Wl,-z,relro -Wl,-z,now -Wl,--allow-shlib-undefined -Wl,-rpath,${PREFIX}/lib -Wl,-rpath-link,${PREFIX}/lib -L${PREFIX}/lib"
+      ;;
     CROSS_osx-64_osx-arm64)
       # Cross-compiling FOR macOS ARM64 (on osx-64)
       # ALWAYS use clean generic flags - conda-build's CFLAGS is often corrupted
@@ -388,7 +401,7 @@ setup_cflags_ldflags() {
       export "${name}_CFLAGS=-march=core2 -mtune=haswell -mssse3 -ftree-vectorize -fPIC -fstack-protector-strong -O2 -pipe -isystem ${BUILD_PREFIX}/include"
       export "${name}_LDFLAGS=-fuse-ld=lld -L${BUILD_PREFIX}/lib -Wl,-headerpad_max_install_names -Wl,-dead_strip_dylibs"
       ;;
-    NATIVE_linux-64_linux-aarch64|NATIVE_linux-64_linux-ppc64le)
+    NATIVE_linux-64_linux-aarch64|NATIVE_linux-64_linux-ppc64le|NATIVE_linux-64_linux-riscv64)
       # Native OCaml build during cross-platform CI (runs on x86_64 BUILD machine)
       export "${name}_CFLAGS=-march=nocona -mtune=haswell -ftree-vectorize -fPIC -fstack-protector-strong -fno-plt -O2 -ffunction-sections -pipe -isystem ${BUILD_PREFIX}/include"
       export "${name}_LDFLAGS=-Wl,-O2 -Wl,--sort-common -Wl,--as-needed -Wl,-z,relro -Wl,-z,now -Wl,--disable-new-dtags -Wl,--gc-sections -Wl,-rpath,${BUILD_PREFIX}/lib -Wl,-rpath-link,${BUILD_PREFIX}/lib -L${BUILD_PREFIX}/lib"
@@ -927,17 +940,38 @@ check_unix_crc() {
   local threads_cmxa="$3"
   local label="$4"
 
+  # ocamlobjinfo is a TARGET binary on cross lanes, so it only runs under
+  # emulation. Prefer an explicit qemu-execve (OCAML_QEMU, from recipe.yaml's
+  # ${{ qemu }}) over binfmt_misc, which dispatches to the image's REGISTERED
+  # interpreter. QEMU_LD_PREFIX must be exported outside any subshell for this
+  # to resolve dynamic loaders correctly. OCAML_QEMU is empty on native lanes,
+  # where the prefix disappears entirely.
+  local -a _runner=()
+  if [[ -n "${OCAML_QEMU:-}" ]] && command -v "${OCAML_QEMU}" >/dev/null 2>&1; then
+    _runner=("${OCAML_QEMU}")
+  fi
+
+  # Capture stdout+stderr TOGETHER into a variable, then filter the variable -
+  # do NOT fold `2>&1` into a pipeline feeding grep. The old form did, which sent
+  # the emulator's own error text into grep where it was silently discarded,
+  # producing an empty CRC with no diagnostic. The `|| true` guards also matter:
+  # under `set -e` a no-match grep aborted the script before the [FAIL] block
+  # below could print anything at all.
+  local unix_out threads_out
+  unix_out=$({ "${_runner[@]}" "${ocamlobjinfo_path}" "${unix_cmxa}"; } 2>&1) || true
+  threads_out=$({ "${_runner[@]}" "${ocamlobjinfo_path}" "${threads_cmxa}"; } 2>&1) || true
+
   # Extract Unix implementation CRC from unix.cmxa
   local unix_crc
-  unix_crc=$("${ocamlobjinfo_path}" "${unix_cmxa}" 2>&1 \
-    | grep -A1 "^Name: Unix$" | grep "CRC of implementation" | awk '{print $NF}')
+  unix_crc=$(printf '%s\n' "${unix_out}" \
+    | grep -A1 "^Name: Unix$" | grep "CRC of implementation" | awk '{print $NF}') || true
 
   # Extract what threads.cmxa expects from Unix (implementation CRC)
   # Must scope to "Implementations imported" section to avoid matching interface CRCs
   local threads_crc
-  threads_crc=$("${ocamlobjinfo_path}" "${threads_cmxa}" 2>&1 \
+  threads_crc=$(printf '%s\n' "${threads_out}" \
     | sed -n '/^Implementations imported:/,/^[A-Z]/p' \
-    | grep -E "^\s+[a-f0-9]+\s+Unix$" | awk '{print $1}' | head -1)
+    | grep -E "^\s+[a-f0-9]+\s+Unix$" | awk '{print $1}' | head -1) || true
 
   if [[ "${unix_crc}" == "${threads_crc}" && -n "${unix_crc}" ]]; then
     echo "    [PASS] ${label}: unix CRC match (${unix_crc})"
@@ -945,6 +979,9 @@ check_unix_crc() {
     echo "    [FAIL] ${label}: unix CRC mismatch"
     echo "           unix.cmxa    CRC: ${unix_crc:-<empty>}"
     echo "           threads.cmxa expects: ${threads_crc:-<empty>}"
+    echo "           runner: ${_runner[*]:-<none, direct exec>}"
+    echo "           --- ocamlobjinfo output on unix.cmxa (first 5 lines) ---"
+    printf '%s\n' "${unix_out}" | head -5 | sed 's/^/           /'
     exit 1
   fi
 }
