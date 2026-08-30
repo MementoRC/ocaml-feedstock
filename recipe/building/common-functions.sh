@@ -768,7 +768,14 @@ patch_makefile_config_post_configure() {
 
   sed -i  's#-fdebug-prefix-map=[^ ]*##g' "${config_file}"
   sed -i  's#-link\s+-L[^ ]*##g' "${config_file}"                             # Remove flexlink's "-link -L..." patterns
-  sed -i  's#-L[^ ]*##g' "${config_file}"                                     # Remove standalone -L paths
+  # Strip ONLY build-sandbox -L paths (conda-bld/rattler-build/build_env).
+  # A relocatable -L${PREFIX}/lib MUST SURVIVE: lib/ocaml/Makefile.config is
+  # declared prefix_detection force_file_type: text (recipe.yaml), so conda
+  # rewrites the prefix at install time. Stripping every -L unconditionally
+  # breaks the test-time relink on native Linux lanes (cannot find -lzstd).
+  # macOS is unaffected because conda-ocaml-mkexe re-supplies -L at runtime,
+  # but build.sh leaves CONDA_OCAML_MKEXE unset on Linux.
+  sed -Ei 's#-L[^ ]*(conda-bld|rattler-build|build_env)[^ ]*##g' "${config_file}"
   # These would be found in BUILD_PREFIX and fail relocation
   # Remove prepended binaries path (could be BUILD_PREFIX non-relocatable)
   # Simple commands: CC, AS, ASM, ASPP, STRIP (line ends with binary name)
@@ -788,6 +795,13 @@ patch_makefile_config_post_configure() {
 #   dest_bin_dir - destination bin directory (e.g., ${BUILD_PREFIX}/bin or ${PREFIX}/bin)
 install_conda_ocaml_wrappers() {
   local dest_bin_dir="$1"
+
+  # conda-ocaml-common is a SOURCED shared library, not an executable tool:
+  # installed at 644 (not 755) into the same dir the wrappers land in, so
+  # each wrapper's `. "$(dirname "$0")/conda-ocaml-common"` resolves at
+  # runtime (wrappers are exec'd from PATH by ocamlopt/dune/flexlink in the
+  # installed prefix, not sourced by the build).
+  install -m 644 "${RECIPE_DIR}/scripts/conda-ocaml-common" "${dest_bin_dir}/conda-ocaml-common"
 
   for wrapper in conda-ocaml-cc conda-ocaml-as conda-ocaml-ar conda-ocaml-ld conda-ocaml-ranlib conda-ocaml-mkexe conda-ocaml-mkdll; do
     install -m 755 "${RECIPE_DIR}/scripts/${wrapper}" "${dest_bin_dir}/${wrapper}"

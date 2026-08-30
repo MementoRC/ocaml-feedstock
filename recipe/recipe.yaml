@@ -129,6 +129,7 @@ outputs:
     build:
       string: ${{ c_compiler ~ "_" if not unix }}h${{ hash }}_${{ build_number }}
       script:
+        file: build.sh
         env:
           SKIP_MAKE_TESTS: "1"
           OCAML_TARGET_PLATFORM: "${{ cross_target_platform_ }}"
@@ -336,6 +337,9 @@ outputs:
                 - if: unix or c_compiler == "vs2022"
                   then:
                     - ocamlruni
+                - if: unix
+                  then:
+                    - conda-ocaml-common
                 - if: not unix and c_compiler == "vs2022"
                   then:
                     - default_amd64.manifest
@@ -358,6 +362,9 @@ outputs:
                 - if: unix
                   then:
                     - ocamlruni
+                - if: unix
+                  then:
+                    - conda-ocaml-common
 
             # CROSS-COMPILER: Prefixed cross tools
             - if: is_cross_compiler
@@ -453,16 +460,14 @@ outputs:
           recipe:
             - testing/test-package-integrity.${{ sh }}
         requirements:
+          build:
+            - ${{ m2 }}file
+            - ${{ m2 }}grep
           run:
             # Use _impl to avoid activation script noise in test output
             - if: unix
               then:
                 - binutils_impl_${{ target_platform }}
-            # Use native grep on arm64 since no QEMU
-            - if: not arm64
-              then:
-                - ${{ m2 }}file
-                - ${{ m2 }}grep
             # QEMU_LD_PREFIX above points at the TARGET sysroot; test envs
             # don't inherit build: reqs, so declare it here explicitly.
             - if: is_cross_compiler

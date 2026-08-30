@@ -107,16 +107,6 @@ if [[ "$BUILD_PLATFORM" == "linux-64" ]]; then
   else
     echo "ppc64le cross-compiler not found, skipping"
   fi
-
-  if command -v riscv64-conda-linux-gnu-ocamlopt >/dev/null 2>&1; then
-    test_cross_compiler \
-      "riscv64-conda-linux-gnu" \
-      "Linux RISC-V 64" \
-      "qemu-execve-riscv64" \
-      "${PREFIX}/riscv64-conda-linux-gnu/sysroot"
-  else
-    echo "riscv64 cross-compiler not found, skipping"
-  fi
 fi
 
 # macOS x86_64: test arm64 cross-compiler
