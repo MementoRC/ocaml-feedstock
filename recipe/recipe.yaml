@@ -48,7 +48,7 @@ context:
   # ===========================================================================
   is_native: ${{ cross_target_platform_ == target_platform and build_platform == target_platform }}
   is_cross_compiler: ${{ cross_target_platform_ != target_platform and cross_build_platform == target_platform }}
-  is_cross_target: ${{ cross_target_platform_ == target_platform and cross_build_platform != target_platform }}
+  is_cross_target: ${{ cross_target_platform_ == target_platform and build_platform != target_platform }}
 
   qemu_arch: ${{ target_platform | replace("linux-", "") }}
   qemu: ${{ "qemu-execve-" ~ qemu_arch if linux and build_platform != target_platform else "" }}
