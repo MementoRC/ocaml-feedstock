@@ -608,15 +608,9 @@ outputs:
           - if: win
             then:
               - ocamlopt${{ xt }} -version && echo "ocaml-compiler toolchain ready"
-          # osx cross-target: the run env holds arm64 binaries but the build host is
-          # osx-64. Rosetta translates x86_64->arm64, not the reverse, so they cannot
-          # execute here. Linux cross-targets still run under QEMU via the export above.
-          - if: unix and not (is_cross_target and osx)
+          - if: unix
             then:
               - ${{ qemu }} "$(command -v ocamlopt${{ xt }})" -version && echo "ocaml-compiler toolchain ready"
-          - if: is_cross_target and osx
-            then:
-              - echo "Skip on arm64"
         requirements:
           build:
             - ${{ qemu_pin }}
@@ -627,17 +621,13 @@ outputs:
 
       # ----------------------------------------------------------------------
       # Compilation tests (requires C toolchain)
-      # Linux cross-targets can run via QEMU, only osx-arm64 cross skipped
+      # Linux cross-targets run under QEMU; osx-64 cross-target runs under Rosetta
       # ----------------------------------------------------------------------
       - script:
           - if: linux and build_platform != target_platform
             then:
               - 'export QEMU_LD_PREFIX="${PREFIX}${{ sysroot }}"'
-          - if: is_cross_target and osx
-            then:
-              - echo "Skip compilation tests on osx arm64 cross target"
-            else:
-              - cd testing && ${{ dot }}test-compilation.${{ sh }} ${{ version }}
+          - cd testing && ${{ dot }}test-compilation.${{ sh }} ${{ version }}
         files:
           recipe:
             - testing/test-compilation.${{ sh }}
@@ -649,17 +639,13 @@ outputs:
 
       # ----------------------------------------------------------------------
       # CONDA_OCAML_* toolchain variable tests
-      # Linux cross-targets can run via QEMU, only osx-arm64 cross skipped
+      # Linux cross-targets run under QEMU; osx-64 cross-target runs under Rosetta
       # ----------------------------------------------------------------------
       - script:
           - if: linux and build_platform != target_platform
             then:
               - 'export QEMU_LD_PREFIX="${PREFIX}${{ sysroot }}"'
-          - if: is_cross_target and osx
-            then:
-              - echo "Skip toolchain var tests on osx arm64 cross target"
-            else:
-              - cd testing && ${{ dot }}test-toolchain-vars.${{ sh }}
+          - cd testing && ${{ dot }}test-toolchain-vars.${{ sh }}
         files:
           recipe:
             - testing/test-toolchain-vars.${{ sh }}

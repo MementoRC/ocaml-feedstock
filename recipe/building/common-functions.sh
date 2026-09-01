@@ -366,7 +366,7 @@ setup_cflags_ldflags() {
   [[ "${target}" != "linux-"* ]] && [[ "${target}" != "osx-"* ]] && target="nonunix-${target#*-}"
   
   case "${name}_${native}_${target}" in
-    NATIVE_osx-64_osx-64|NATIVE_linux-64_linux-64|NATIVE_linux-aarch64_linux-aarch64|NATIVE_nonunix-64_nonunix-64)
+    NATIVE_osx-64_osx-64|NATIVE_osx-arm64_osx-arm64|NATIVE_linux-64_linux-64|NATIVE_linux-aarch64_linux-aarch64|NATIVE_nonunix-64_nonunix-64)
       # Native build: use environment CFLAGS (set by conda-build for this platform)
       export "${name}_CFLAGS=${CFLAGS:-}"
       export "${name}_LDFLAGS=${LDFLAGS:-}"
@@ -396,12 +396,25 @@ setup_cflags_ldflags() {
       export "${name}_CFLAGS=-ftree-vectorize -fPIC -O2 -pipe -isystem ${PREFIX}/include${ARM64_SYSROOT:+ -isysroot ${ARM64_SYSROOT}}"
       export "${name}_LDFLAGS=-fuse-ld=lld -L${PREFIX}/lib -Wl,-headerpad_max_install_names -Wl,-dead_strip_dylibs${ARM64_SYSROOT:+ -isysroot ${ARM64_SYSROOT}}"
       ;;
+    CROSS_osx-arm64_osx-64)
+      # No setup_macos_sysroot here: that helper only provisions an ARM64 SDK (MacOSX11.0),
+      # needed because Intel runners carry MacOSX10.13 which cannot target arm64. The
+      # reverse direction needs no workaround - an arm64 runner's SDK is 11.0+ and can
+      # target x86_64 - so use the sysroot conda-forge activation already supplies.
+      export "${name}_CFLAGS=-ftree-vectorize -fPIC -O2 -pipe -isystem ${PREFIX}/include"
+      export "${name}_LDFLAGS=-fuse-ld=lld -L${PREFIX}/lib -Wl,-headerpad_max_install_names -Wl,-dead_strip_dylibs"
+      ;;
     NATIVE_osx-64_osx-arm64)
       # Native OCaml build during cross-platform CI (runs on x86_64 BUILD machine)
       # MUST include -L${BUILD_PREFIX}/lib for zstd - PREFIX has ARM64 libs!
       # CRITICAL: Also strip -L$PREFIX from global LDFLAGS (conda-build sets it with ARM64 paths)
       export LDFLAGS="-L${BUILD_PREFIX}/lib ${LDFLAGS//-L${PREFIX}\/lib/}"
       export "${name}_CFLAGS=-march=core2 -mtune=haswell -mssse3 -ftree-vectorize -fPIC -fstack-protector-strong -O2 -pipe -isystem ${BUILD_PREFIX}/include"
+      export "${name}_LDFLAGS=-fuse-ld=lld -L${BUILD_PREFIX}/lib -Wl,-headerpad_max_install_names -Wl,-dead_strip_dylibs"
+      ;;
+    NATIVE_osx-arm64_osx-64)
+      export LDFLAGS="-L${BUILD_PREFIX}/lib ${LDFLAGS//-L${PREFIX}\/lib/}"
+      export "${name}_CFLAGS=-ftree-vectorize -fPIC -fstack-protector-strong -O2 -pipe -isystem ${BUILD_PREFIX}/include"
       export "${name}_LDFLAGS=-fuse-ld=lld -L${BUILD_PREFIX}/lib -Wl,-headerpad_max_install_names -Wl,-dead_strip_dylibs"
       ;;
     NATIVE_linux-64_linux-aarch64|NATIVE_linux-64_linux-ppc64le|NATIVE_linux-64_linux-riscv64)
@@ -419,6 +432,10 @@ setup_cflags_ldflags() {
       # holds ARM64 libs. Use BUILD_PREFIX x86_64 flags instead, mirroring the
       # NATIVE_osx-64_osx-arm64 arm above, which exists for the same hazard.
       export "${name}_CFLAGS=-march=core2 -mtune=haswell -mssse3 -ftree-vectorize -fPIC -fstack-protector-strong -O2 -pipe -isystem ${BUILD_PREFIX}/include"
+      export "${name}_LDFLAGS=-fuse-ld=lld -L${BUILD_PREFIX}/lib -Wl,-headerpad_max_install_names -Wl,-dead_strip_dylibs"
+      ;;
+    CROSS_osx-arm64_osx-arm64)
+      export "${name}_CFLAGS=-ftree-vectorize -fPIC -fstack-protector-strong -O2 -pipe -isystem ${BUILD_PREFIX}/include"
       export "${name}_LDFLAGS=-fuse-ld=lld -L${BUILD_PREFIX}/lib -Wl,-headerpad_max_install_names -Wl,-dead_strip_dylibs"
       ;;
     CROSS_linux-64_linux-64|CROSS_nonunix-*|*)
