@@ -567,7 +567,6 @@ outputs:
           run:
             # QEMU_LD_PREFIX above points at the TARGET sysroot; test envs
             # don't inherit build: reqs, so declare it here explicitly.
-            # LINUX-ONLY: see the matching note above - sysroot_* is glibc-only.
             - if: is_cross_compiler and linux
               then:
                 - sysroot_${{ cross_target_platform_ }} ${{ actual_c_stdlib_version }}.*

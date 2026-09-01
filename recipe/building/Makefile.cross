@@ -204,11 +204,9 @@ endif
 	$(MAKE) ocaml $(CROSS_COMPILER_OVERRIDES) $(OLDS)
 	$(MAKE) dynlink-all $(CROSS_OVERRIDES) $(OLDS)
 	$(MAKE) -C otherlibs all $(CROSS_OTHERLIBS_OVERRIDES) $(OLDS)
-	# libasmrun_shared.so is NOT built by runtimeopt under configure's verdict.
-	# A valid MKDLL alone was proven insufficient: crossopt.log from build
-	# 1788226999 shows runtimeopt invoked with MKDLL='...gcc -shared' and NO
-	# libasmrun_shared.so link line, so the shared-library support flag must be
-	# overridden here too, matching SUPPORTS_SHARED_LIBRARIES in INSTALL_OVERRIDES.
+	# configure's verdict gates libasmrun_shared.so. A valid MKDLL alone was proven
+	# insufficient, so SUPPORTS_SHARED_LIBRARIES is overridden here too, matching
+	# INSTALL_OVERRIDES.
 	$(MAKE) runtimeopt $(RUNTIME_VARS) MKDLL='$(CROSS_MKDLL)' SUPPORTS_SHARED_LIBRARIES=true $(OLDS)
 	# CRITICAL FIX: Rebuild bytecode runtime libraries for TARGET architecture
 	# runtime-all above builds libcamlrun for BUILD (x86_64), but -output-complete-exe

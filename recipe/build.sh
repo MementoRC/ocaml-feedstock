@@ -1132,15 +1132,6 @@ TOOLWRAPPER
         "${CROSS_TOOLCHAIN_ARGS[@]}"
         PREFIX="${OCAML_CROSS_PREFIX}"
       )
-      # --- DIAGNOSTIC (temporary): shared-runtime-library state before install ---
-      # Placed HERE, not inside the installcross make target: run_logged redirects
-      # its command's output to ${LOG_DIR}/installcross.log and only echoes it on
-      # FAILURE, so anything printed inside the target is invisible on a good run.
-      echo "    [diag] shared-lib config in ${SRC_DIR}/Makefile.config:"
-      grep -iE 'shared|MKDLL|^SO=|NATDYNLINK' "${SRC_DIR}/Makefile.config" 2>&1 | sed 's/^/      [diag]   /' || true
-      echo "    [diag] runtime/*.so present in build tree:"
-      ls -l "${SRC_DIR}"/runtime/*.so 2>&1 | sed 's/^/      [diag]   /' || true
-      echo "    [diag] end"
 
       run_logged "installcross" "${MAKE[@]}" installcross "${INSTALL_ARGS[@]}"
     )
@@ -1715,9 +1706,7 @@ EOF
     # not shipped, so stripping is unnecessary.
     CROSSCOMPILEDOPT_ARGS+=(STRIP=:)
 
-    # QEMU_LD_PREFIX: same rationale as the crossopt leg above - crosscompiledopt
-    # also emulates TARGET binaries on the build machine under qemu-user and
-    # needs the target sysroot, or qemu searches the HOST /lib and dies.
+    # QEMU_LD_PREFIX: same rationale as the crossopt leg above.
     if [[ "${CROSS_PLATFORM}" != "${build_platform:-}" && -n "${OCAML_TARGET_TRIPLET:-}" ]]; then
       _qemu_sysroot="${BUILD_PREFIX}/${OCAML_TARGET_TRIPLET}/sysroot"
       if [[ -d "${_qemu_sysroot}" ]]; then
