@@ -409,7 +409,19 @@ setup_cflags_ldflags() {
       export "${name}_CFLAGS=-march=nocona -mtune=haswell -ftree-vectorize -fPIC -fstack-protector-strong -fno-plt -O2 -ffunction-sections -pipe -isystem ${BUILD_PREFIX}/include"
       export "${name}_LDFLAGS=-Wl,-O2 -Wl,--sort-common -Wl,--as-needed -Wl,-z,relro -Wl,-z,now -Wl,--disable-new-dtags -Wl,--gc-sections -Wl,-rpath,${BUILD_PREFIX}/lib -Wl,-rpath-link,${BUILD_PREFIX}/lib -L${BUILD_PREFIX}/lib"
       ;;
-    CROSS_linux-64_linux-64|CROSS_osx-64_osx-64|CROSS_nonunix-*|*)
+    CROSS_osx-64_osx-64)
+      # "Double-cross" variant osx_arm64_cross_target_platform_osx-64: the BUILD
+      # host is osx-64 and target_platform is osx-arm64, but THIS cross-compiler
+      # emits osx-64 code, so build == cross target. That is legitimate; the
+      # catch-all below used to reject it outright (exit 1).
+      # Do NOT reuse the ambient CFLAGS/LDFLAGS the way the NATIVE_*_* arm does:
+      # conda-build sets them for target_platform=osx-arm64, so -L${PREFIX}/lib
+      # holds ARM64 libs. Use BUILD_PREFIX x86_64 flags instead, mirroring the
+      # NATIVE_osx-64_osx-arm64 arm above, which exists for the same hazard.
+      export "${name}_CFLAGS=-march=core2 -mtune=haswell -mssse3 -ftree-vectorize -fPIC -fstack-protector-strong -O2 -pipe -isystem ${BUILD_PREFIX}/include"
+      export "${name}_LDFLAGS=-fuse-ld=lld -L${BUILD_PREFIX}/lib -Wl,-headerpad_max_install_names -Wl,-dead_strip_dylibs"
+      ;;
+    CROSS_linux-64_linux-64|CROSS_nonunix-*|*)
       echo "ERROR: setup_cflags_ldflags used with incorrect arguments"
       echo "   name:            ${name}"
       echo "   native platform: ${native}"

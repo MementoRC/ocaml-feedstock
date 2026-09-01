@@ -350,6 +350,30 @@ build_native() {
   # Add toolchain to configure args
   # NOTE: OCaml 5.4.0+ requires CFLAGS/LDFLAGS as environment variables, not configure args.
   # Passing them as args causes make to misparse flags like -O2 as filenames.
+  # non-unix: pass BARE TOOL NAMES to configure, not absolute paths.
+  # find_tool() returns an absolute path, and on Windows BUILD_PREFIX carries
+  # backslashes. When make hands that string to /bin/sh the backslashes are eaten
+  # as escapes, producing e.g.
+  #   D:bldbldrattler-build_ocaml_win-64_...build_env/Library/bin/x86_64-w64-mingw32-ar.exe
+  # -> "No such file or directory", make[1] Makefile:1412 libcamlrun_non_shared.a
+  #    Error 127, make Makefile:852 world.opt Error 2.
+  # Basenames resolve via PATH instead, so no path conversion (cygpath) is needed.
+  # generate_native_env_file() already basenames these, but only inside the heredoc
+  # it writes to _native_compiler_env.sh - the LIVE shell vars keep the full path.
+  # GUARDED to non-unix only: unix lanes pass absolute paths today and work.
+  if ! is_unix; then
+    NATIVE_AR="${NATIVE_AR##*/}"
+    NATIVE_AS="${NATIVE_AS##*/}"
+    NATIVE_LD="${NATIVE_LD##*/}"
+    NATIVE_RANLIB="${NATIVE_RANLIB##*/}"
+    # CC/STRIP mangle the same way (e.g. Makefile:494 utils/domainstate.mli
+    # Error 127, with .../x86_64-w64-mingw32-gcc.exe not found) - same
+    # mechanism as AR above, so they get the same basename treatment.
+    NATIVE_CC="${NATIVE_CC##*/}"
+    NATIVE_STRIP="${NATIVE_STRIP##*/}"
+    export NATIVE_AR NATIVE_AS NATIVE_LD NATIVE_RANLIB NATIVE_CC NATIVE_STRIP
+    echo "  non-unix: using bare tool names AR=${NATIVE_AR} AS=${NATIVE_AS} LD=${NATIVE_LD} RANLIB=${NATIVE_RANLIB} CC=${NATIVE_CC} STRIP=${NATIVE_STRIP}"
+  fi
   export CC="${NATIVE_CC}"
   export STRIP="${NATIVE_STRIP}"
 
@@ -815,7 +839,9 @@ TOOLWRAPPER
     # conda-forge at all (PackagesNotFoundInChannelsError). Probe the
     # actual outcome rather than assuming success - emitting -lzstd for a library
     # that was never installed fails the libcamlrun_shared.so link.
-    if [[ -f "${TARGET_ZSTD_LIB}/libzstd.so" || -f "${TARGET_ZSTD_LIB}/libzstd.a" ]]; then
+    # libzstd.dylib: conda's macOS zstd ships ONLY the .dylib, so a .so/.a-only
+    # probe is blind on every osx-* target and always reports "not available".
+    if [[ -f "${TARGET_ZSTD_LIB}/libzstd.so" || -f "${TARGET_ZSTD_LIB}/libzstd.a" || -f "${TARGET_ZSTD_LIB}/libzstd.dylib" ]]; then
       TARGET_ZSTD_AVAILABLE=1
       TARGET_ZSTD_LIBS="-L${TARGET_ZSTD_LIB} -lzstd"
     else
@@ -1555,7 +1581,8 @@ EOF
     _TARGET_ZSTD_ENV="zstd_${CROSS_PLATFORM}"
     _TARGET_ZSTD_ENVS_DIR=$(conda info --json 2>/dev/null | python3 -c "import sys,json; print(json.load(sys.stdin)['envs_dirs'][0])")
     _TARGET_ZSTD_LIB="${_TARGET_ZSTD_ENVS_DIR}/${_TARGET_ZSTD_ENV}/lib"
-    if [[ -f "${_TARGET_ZSTD_LIB}/libzstd.so" || -f "${_TARGET_ZSTD_LIB}/libzstd.a" ]]; then
+    # libzstd.dylib: see the matching [zstd-probe] note above - macOS ships only .dylib.
+    if [[ -f "${_TARGET_ZSTD_LIB}/libzstd.so" || -f "${_TARGET_ZSTD_LIB}/libzstd.a" || -f "${_TARGET_ZSTD_LIB}/libzstd.dylib" ]]; then
       TARGET_ZSTD_AVAILABLE=1
     else
       TARGET_ZSTD_AVAILABLE=0
