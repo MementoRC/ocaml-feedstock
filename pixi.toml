@@ -127,15 +127,6 @@ description = "Build ocaml-feedstock-pr1-riscv64-feedstock with variant osx_64_c
 [feature.build.tasks."inspect-osx_64_cross_target_platform_osx-arm64"]
 cmd = "inspect_artifacts --recipe-dir recipe -m .ci_support/osx_64_cross_target_platform_osx-arm64.yaml"
 description = "List contents of ocaml-feedstock-pr1-riscv64-feedstock packages built for variant osx_64_cross_target_platform_osx-arm64"
-[feature.build.tasks."build-osx_arm64_cross_target_platform_osx-64"]
-cmd = "rattler-build build --recipe recipe -m .ci_support/osx_arm64_cross_target_platform_osx-64.yaml"
-description = "Build ocaml-feedstock-pr1-riscv64-feedstock with variant osx_arm64_cross_target_platform_osx-64 directly (without setup scripts)"
-[feature.build.tasks."debug-osx_arm64_cross_target_platform_osx-64"]
-cmd = "rattler-build debug setup --recipe recipe -m .ci_support/osx_arm64_cross_target_platform_osx-64.yaml"
-description = "Build ocaml-feedstock-pr1-riscv64-feedstock with variant osx_arm64_cross_target_platform_osx-64 directly (without setup scripts)"
-[feature.build.tasks."inspect-osx_arm64_cross_target_platform_osx-64"]
-cmd = "inspect_artifacts --recipe-dir recipe -m .ci_support/osx_arm64_cross_target_platform_osx-64.yaml"
-description = "List contents of ocaml-feedstock-pr1-riscv64-feedstock packages built for variant osx_arm64_cross_target_platform_osx-64"
 [feature.build.tasks."build-osx_arm64_cross_target_platform_osx-arm64"]
 cmd = "rattler-build build --recipe recipe -m .ci_support/osx_arm64_cross_target_platform_osx-arm64.yaml"
 description = "Build ocaml-feedstock-pr1-riscv64-feedstock with variant osx_arm64_cross_target_platform_osx-arm64 directly (without setup scripts)"
