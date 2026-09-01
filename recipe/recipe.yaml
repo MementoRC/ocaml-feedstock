@@ -38,7 +38,6 @@ context:
       "linux-64" if cross_target_platform_ in ["linux-aarch64", "linux-ppc64le", "linux-riscv64", "linux-s390x"] else
       "linux-aarch64" if cross_target_platform_ in ["linux-64", "linux-riscv64"]             else
       "osx-64" if cross_target_platform_ in ["osx-arm64"]                                    else
-      "osx-arm64" if cross_target_platform_ in ["osx-64"]                                    else
       "win-64"   if cross_target_platform_ == "win-64"                                       else
       "unknown_cross_build_platform"
     }}
@@ -472,7 +471,10 @@ outputs:
                 - binutils_impl_${{ target_platform }}
             # QEMU_LD_PREFIX above points at the TARGET sysroot; test envs
             # don't inherit build: reqs, so declare it here explicitly.
-            - if: is_cross_compiler
+            # LINUX-ONLY: sysroot_* is a glibc package family and
+            # actual_c_stdlib_version is a glibc version (2.17/2.39), so on osx
+            # this resolved to the nonexistent `sysroot_osx-arm64 2.17.*`.
+            - if: is_cross_compiler and linux
               then:
                 - sysroot_${{ cross_target_platform_ }} ${{ actual_c_stdlib_version }}.*
 
@@ -565,7 +567,8 @@ outputs:
           run:
             # QEMU_LD_PREFIX above points at the TARGET sysroot; test envs
             # don't inherit build: reqs, so declare it here explicitly.
-            - if: is_cross_compiler
+            # LINUX-ONLY: see the matching note above - sysroot_* is glibc-only.
+            - if: is_cross_compiler and linux
               then:
                 - sysroot_${{ cross_target_platform_ }} ${{ actual_c_stdlib_version }}.*
 
@@ -606,8 +609,15 @@ outputs:
           - if: win
             then:
               - ocamlopt${{ xt }} -version && echo "ocaml-compiler toolchain ready"
-            else:
+          # osx cross-target: the run env holds arm64 binaries but the build host is
+          # osx-64. Rosetta translates x86_64->arm64, not the reverse, so they cannot
+          # execute here. Linux cross-targets still run under QEMU via the export above.
+          - if: unix and not (is_cross_target and osx)
+            then:
               - ${{ qemu }} "$(command -v ocamlopt${{ xt }})" -version && echo "ocaml-compiler toolchain ready"
+          - if: is_cross_target and osx
+            then:
+              - echo "Skipping: arm64 target binaries cannot run on the osx-64 build host"
         requirements:
           build:
             - ${{ qemu_pin }}
@@ -624,7 +634,11 @@ outputs:
           - if: linux and build_platform != target_platform
             then:
               - 'export QEMU_LD_PREFIX="${PREFIX}${{ sysroot }}"'
-          - cd testing && ${{ dot }}test-compilation.${{ sh }} ${{ version }}
+          - if: is_cross_target and osx
+            then:
+              - echo "Skipping: arm64 target binaries cannot run on the osx-64 build host"
+            else:
+              - cd testing && ${{ dot }}test-compilation.${{ sh }} ${{ version }}
         files:
           recipe:
             - testing/test-compilation.${{ sh }}
@@ -642,7 +656,11 @@ outputs:
           - if: linux and build_platform != target_platform
             then:
               - 'export QEMU_LD_PREFIX="${PREFIX}${{ sysroot }}"'
-          - cd testing && ${{ dot }}test-toolchain-vars.${{ sh }}
+          - if: is_cross_target and osx
+            then:
+              - echo "Skipping: arm64 target binaries cannot run on the osx-64 build host"
+            else:
+              - cd testing && ${{ dot }}test-toolchain-vars.${{ sh }}
         files:
           recipe:
             - testing/test-toolchain-vars.${{ sh }}
