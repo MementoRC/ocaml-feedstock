@@ -337,6 +337,9 @@ get_arch_for_sanitization() {
     powerpc64le-*|linux-ppc64le|ppc64le-*)
       echo "powerpc64le"
       ;;
+    riscv64-*|linux-riscv64)
+      echo "riscv64"
+      ;;
     x86_64-*|linux-64|osx-64)
       echo "x86_64"
       ;;
@@ -363,19 +366,19 @@ setup_cflags_ldflags() {
   [[ "${target}" != "linux-"* ]] && [[ "${target}" != "osx-"* ]] && target="nonunix-${target#*-}"
   
   case "${name}_${native}_${target}" in
-    NATIVE_osx-64_osx-64|NATIVE_linux-64_linux-64|NATIVE_nonunix-64_nonunix-64)
+    NATIVE_osx-64_osx-64|NATIVE_linux-64_linux-64|NATIVE_linux-aarch64_linux-aarch64|NATIVE_nonunix-64_nonunix-64)
       # Native build: use environment CFLAGS (set by conda-build for this platform)
       export "${name}_CFLAGS=${CFLAGS:-}"
       export "${name}_LDFLAGS=${LDFLAGS:-}"
       ;;
-    CROSS_linux-64_linux-aarch64|CROSS_linux-64_linux-ppc64le)
+    CROSS_linux-64_linux-aarch64|CROSS_linux-64_linux-ppc64le|CROSS_linux-aarch64_linux-ppc64le|CROSS_linux-aarch64_linux-64)
       # Cross-compiling FOR Linux aarch64/ppc64le
       # ALWAYS use clean generic flags - conda-build's CFLAGS is often corrupted with
       # mixed build/target flags that cause -march=nocona on aarch64 cross-compiler
       export "${name}_CFLAGS=-ftree-vectorize -fPIC -fstack-protector-strong -O2 -pipe -isystem ${PREFIX}/include"
       export "${name}_LDFLAGS=-Wl,-O2 -Wl,--as-needed -Wl,-z,relro -Wl,-z,now -L${PREFIX}/lib"
       ;;
-    CROSS_linux-64_linux-riscv64)
+    CROSS_linux-64_linux-riscv64|CROSS_linux-aarch64_linux-riscv64)
       # Cross-compiling FOR Linux riscv64. Same clean generic CFLAGS as
       # aarch64/ppc64le, but riscv64 needs conda-forge's own linker policy:
       # activate-gcc_linux-riscv64.sh enables -Wl,--allow-shlib-undefined and

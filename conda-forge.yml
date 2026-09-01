@@ -14,6 +14,3 @@ provider:
   linux_aarch64: default
   osx_arm64: default
 test: all
-# linter:
-#   skip:
-#     - lint_stdlib

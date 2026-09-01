@@ -1106,6 +1106,15 @@ TOOLWRAPPER
         "${CROSS_TOOLCHAIN_ARGS[@]}"
         PREFIX="${OCAML_CROSS_PREFIX}"
       )
+      # --- DIAGNOSTIC (temporary): shared-runtime-library state before install ---
+      # Placed HERE, not inside the installcross make target: run_logged redirects
+      # its command's output to ${LOG_DIR}/installcross.log and only echoes it on
+      # FAILURE, so anything printed inside the target is invisible on a good run.
+      echo "    [diag] shared-lib config in ${SRC_DIR}/Makefile.config:"
+      grep -iE 'shared|MKDLL|^SO=|NATDYNLINK' "${SRC_DIR}/Makefile.config" 2>&1 | sed 's/^/      [diag]   /' || true
+      echo "    [diag] runtime/*.so present in build tree:"
+      ls -l "${SRC_DIR}"/runtime/*.so 2>&1 | sed 's/^/      [diag]   /' || true
+      echo "    [diag] end"
 
       run_logged "installcross" "${MAKE[@]}" installcross "${INSTALL_ARGS[@]}"
     )
@@ -1272,6 +1281,8 @@ EOF
           aarch64) _expected="AArch64|aarch64|arm64|ARM64" ;;
           power) _expected="PowerPC|ppc64" ;;
           riscv) _expected="RISC-V|RISCV|riscv" ;;
+          amd64) _expected="x86-64|x86_64|X86-64|amd64" ;;
+          s390x) _expected="S/390|s390|IBM S/390" ;;
           *) _expected="${CROSS_ARCH}" ;;
         esac
         if ! echo "$_arch_info" | grep -qiE "$_expected"; then
