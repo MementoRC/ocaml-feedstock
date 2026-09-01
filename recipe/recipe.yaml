@@ -617,7 +617,7 @@ outputs:
               - ${{ qemu }} "$(command -v ocamlopt${{ xt }})" -version && echo "ocaml-compiler toolchain ready"
           - if: is_cross_target and osx
             then:
-              - echo "Skipping: arm64 target binaries cannot run on the osx-64 build host"
+              - echo "Skip on arm64"
         requirements:
           build:
             - ${{ qemu_pin }}
@@ -636,7 +636,7 @@ outputs:
               - 'export QEMU_LD_PREFIX="${PREFIX}${{ sysroot }}"'
           - if: is_cross_target and osx
             then:
-              - echo "Skipping: arm64 target binaries cannot run on the osx-64 build host"
+              - echo "Skip compilation tests on osx arm64 cross target"
             else:
               - cd testing && ${{ dot }}test-compilation.${{ sh }} ${{ version }}
         files:
@@ -658,7 +658,7 @@ outputs:
               - 'export QEMU_LD_PREFIX="${PREFIX}${{ sysroot }}"'
           - if: is_cross_target and osx
             then:
-              - echo "Skipping: arm64 target binaries cannot run on the osx-64 build host"
+              - echo "Skip toolchain var tests on osx arm64 cross target"
             else:
               - cd testing && ${{ dot }}test-toolchain-vars.${{ sh }}
         files:
