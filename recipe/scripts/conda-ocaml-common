@@ -31,6 +31,17 @@ ocaml_exec_simple() {
 # here, not the flags.
 ocaml_darwin_fallback() {
   local var_value="$1" darwin_default="$2" generic_default="$3"
+  # A tool name baked into a previously-built package's activation script may not
+  # exist in this environment - e.g. a package built when the macOS host was Intel
+  # bakes "<triplet>-gcc", and no -gcc driver exists on macOS at all. Exec-ing that
+  # fails with "not found". Treat a non-existent tool as unset so the darwin
+  # default applies. Guarded to darwin only: this helper is shared with
+  # conda-ocaml-mkdll and other platforms must keep their current behaviour.
+  if [[ -n "${var_value}" ]] && [[ "$OSTYPE" == darwin* ]]; then
+    if ! command -v -- "${var_value%% *}" >/dev/null 2>&1; then
+      var_value=""
+    fi
+  fi
   if [[ -z "${var_value}" ]] && [[ "$OSTYPE" == darwin* ]]; then
     printf '%s' "${darwin_default}"
   else

@@ -502,8 +502,9 @@ build_native() {
   echo "    config.generated.ml native_compiler: $(grep 'native_compiler' "$config_file" | head -1 || echo '(not found)')"
 
   # NOTE: Do NOT remove -L paths here - they're needed for the build.
-  # The -L path removal for bytecomp_c_libraries happens AFTER world.opt build
-  # but BEFORE install, to avoid non-relocatable paths in installed binaries.
+  # The -L removal for the *_c_libraries values happens further down, still
+  # BEFORE world.opt: world.opt compiles those values into the Config module,
+  # so any edit made after it has no effect on `ocamlopt -config-var`.
 
   if is_unix; then
     # Unix: Use conda-ocaml-* wrapper scripts that expand CONDA_OCAML_* environment variables
@@ -576,6 +577,31 @@ build_native() {
     # Configure generates "... $(addprefix...) -link " but when OC_LDFLAGS is empty,
     # this trailing "-link" causes "flexlink ... -link -o output" which passes -o to linker!
     sed -i 's/^\(MK[A-Z]*=.*\)[[:space:]]*-link[[:space:]]*$/\1/' "$config_file"
+  fi
+
+  # Strip build-time -L paths from config.generated.ml (macOS)
+  #
+  # utils/config.generated.ml holds the *_c_libraries values that configure
+  # produced. world.opt compiles these INTO the Config module, so
+  # `ocamlc/ocamlopt -config-var bytecomp_c_libraries` reads THIS file, not
+  # Makefile.config. Cleaning Makefile.config cannot affect it (refuted twice).
+  #
+  # This MUST run BEFORE world.opt. Editing config.generated.ml afterwards has no
+  # effect. The strip also removes the legitimate relocatable -L${PREFIX}/lib; on
+  # macOS conda-ocaml-mkexe re-supplies it at runtime, which is why this is
+  # guarded to osx only.
+  if [[ "${target_platform}" == "osx"* ]]; then
+    local _cfg_ml="utils/config.generated.ml"
+    echo "  - Stripping build-time -L paths from ${_cfg_ml}..."
+    local _cvar
+    for _cvar in bytecomp_c_libraries native_c_libraries compression_c_libraries; do
+      if grep -q "^let ${_cvar} = " "${_cfg_ml}" 2>/dev/null; then
+        sed -i -E "/^let ${_cvar} = /s#-L[^ |]+ *##g" "${_cfg_ml}"
+      fi
+    done
+    echo "  [diag] post-strip config.generated.ml C-library vars:"
+    grep -E '^let (bytecomp|native|compression)_c_libraries = ' "${_cfg_ml}" \
+      | sed 's/^/    /' || echo "    [diag] (no matching vars)"
   fi
 
   # ============================================================================
@@ -2047,13 +2073,19 @@ if [[ "${BUILD_MODE}" == "native" ]] || [[ "${BUILD_MODE}" == "cross-target" ]];
     # The package runs on OCAML_TARGET_PLATFORM, so it needs that platform's tools
     if [[ "${BUILD_MODE}" == "cross-target" ]]; then
       echo "  (Using TARGET toolchain: ${OCAML_TARGET_TRIPLET}-*)"
+      # macOS has no -gcc driver; common-functions.sh selects -clang for *-apple-*
+      # and only linux/mingw use -gcc. Mirror that here.
+      _drv="gcc"
+      case "${OCAML_TARGET_TRIPLET}" in
+        *-apple-*) _drv="clang" ;;
+      esac
       export CONDA_OCAML_AR="${OCAML_TARGET_TRIPLET}-ar"
       export CONDA_OCAML_AS="${OCAML_TARGET_TRIPLET}-as"
-      export CONDA_OCAML_CC="${OCAML_TARGET_TRIPLET}-gcc"
+      export CONDA_OCAML_CC="${OCAML_TARGET_TRIPLET}-${_drv}"
       export CONDA_OCAML_LD="${OCAML_TARGET_TRIPLET}-ld"
       export CONDA_OCAML_RANLIB="${OCAML_TARGET_TRIPLET}-ranlib"
-      export CONDA_OCAML_MKEXE="${OCAML_TARGET_TRIPLET}-gcc"
-      export CONDA_OCAML_MKDLL="${OCAML_TARGET_TRIPLET}-gcc -shared"
+      export CONDA_OCAML_MKEXE="${OCAML_TARGET_TRIPLET}-${_drv}"
+      export CONDA_OCAML_MKDLL="${OCAML_TARGET_TRIPLET}-${_drv} -shared"
       export CONDA_OCAML_WINDRES="${OCAML_TARGET_TRIPLET}-windres"
     elif [[ -z "${CONDA_OCAML_AR:-}" ]]; then
       # Stage 3 fast path (native mode): use triplet-prefixed names from BUILD_PREFIX
