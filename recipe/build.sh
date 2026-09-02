@@ -2110,16 +2110,27 @@ if [[ "${BUILD_MODE}" == "native" ]] || [[ "${BUILD_MODE}" == "cross-target" ]];
       # macOS has no -gcc driver; common-functions.sh selects -clang for *-apple-*
       # and only linux/mingw use -gcc. Mirror that here.
       _drv="gcc"
+      _mkexe_flags=""
+      _mkdll_flags="-shared"
       case "${OCAML_TARGET_TRIPLET}" in
-        *-apple-*) _drv="clang" ;;
+        *-apple-*)
+          _drv="clang"
+          # Mirror common-functions.sh setup_toolchain()'s *-apple-* branch (MKEXE/MKDLL
+          # composition) so the flags baked into the SHIPPED activation script match what
+          # a native build would use. -isysroot is deliberately excluded: it is a BUILD-
+          # machine absolute SDK path and would be a relocation hazard once baked in.
+          _vmin="-mmacosx-version-min=${MACOSX_DEPLOYMENT_TARGET:-10.13}"
+          _mkexe_flags="${_vmin} -Wl,-headerpad_max_install_names -Wl,-rpath,@executable_path/../lib"
+          _mkdll_flags="${_vmin} -shared -Wl,-headerpad_max_install_names -undefined dynamic_lookup"
+          ;;
       esac
       export CONDA_OCAML_AR="${OCAML_TARGET_TRIPLET}-ar"
       export CONDA_OCAML_AS="${OCAML_TARGET_TRIPLET}-as"
       export CONDA_OCAML_CC="${OCAML_TARGET_TRIPLET}-${_drv}"
       export CONDA_OCAML_LD="${OCAML_TARGET_TRIPLET}-ld"
       export CONDA_OCAML_RANLIB="${OCAML_TARGET_TRIPLET}-ranlib"
-      export CONDA_OCAML_MKEXE="${OCAML_TARGET_TRIPLET}-${_drv}"
-      export CONDA_OCAML_MKDLL="${OCAML_TARGET_TRIPLET}-${_drv} -shared"
+      export CONDA_OCAML_MKEXE="${OCAML_TARGET_TRIPLET}-${_drv}${_mkexe_flags:+ ${_mkexe_flags}}"
+      export CONDA_OCAML_MKDLL="${OCAML_TARGET_TRIPLET}-${_drv} ${_mkdll_flags}"
       export CONDA_OCAML_WINDRES="${OCAML_TARGET_TRIPLET}-windres"
     elif [[ -z "${CONDA_OCAML_AR:-}" ]]; then
       # Stage 3 fast path (native mode): use triplet-prefixed names from BUILD_PREFIX
