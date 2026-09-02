@@ -1663,6 +1663,32 @@ EOF
   local config_file="utils/config.generated.ml"
   [[ -n "${CROSS_MODEL}" ]] && sed -i "s#^let model = .*#let model = {|${CROSS_MODEL}|}#" "$config_file"
 
+  # Strip build-time -L paths from config.generated.ml (macOS)
+  #
+  # stage3_configure (above) regenerates utils/config.generated.ml with a
+  # build-time -L baked into bytecomp_c_libraries/native_c_libraries, and
+  # patch_config_generated_ml_native only rewrites tool names - it does not
+  # strip -L. crosscompiledopt below bakes whatever is in this file into the
+  # cross ocamlopt's Config module, so this must run after both of those and
+  # before crosscompiledopt. Guarded to osx only: it also removes the
+  # legitimate relocatable -L${PREFIX}/lib, which macOS conda-ocaml-mkexe
+  # re-supplies at runtime, but Linux cross-target lanes (aarch64/ppc64le/
+  # riscv64) do NOT and would fail with "cannot find -lzstd" if unguarded.
+  # Intentionally duplicates the build_native block at ~601-613.
+  if [[ "${target_platform}" == "osx"* ]]; then
+    local _cfg_ml="utils/config.generated.ml"
+    echo "  - Stripping build-time -L paths from ${_cfg_ml}..."
+    local _cvar
+    for _cvar in bytecomp_c_libraries native_c_libraries compression_c_libraries; do
+      if grep -q "^let ${_cvar} = " "${_cfg_ml}" 2>/dev/null; then
+        sed -i -E "/^let ${_cvar} = /s#-L[^ |]+ *##g" "${_cfg_ml}"
+      fi
+    done
+    echo "  [diag] post-strip config.generated.ml C-library vars:"
+    grep -E '^let (bytecomp|native|compression)_c_libraries = ' "${_cfg_ml}" \
+      | sed 's/^/    /' || echo "    [diag] (no matching vars)"
+  fi
+
   # Apply Makefile.cross patches
   apply_cross_patches
 
