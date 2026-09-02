@@ -171,13 +171,21 @@ fi
 
 # Export CONDA_OCAML_* cross-compilation env and add cross-tools to PATH.
 # Used by both crossopt and installcross subshells in build_cross_compiler().
-# NOTE: CONDA_OCAML_MKEXE intentionally NOT set - use native linker.
+# NOTE: CONDA_OCAML_MKEXE gets the NATIVE linker here, not the cross one.
+# It used to be left unset for that purpose, but "not setting" it stopped
+# meaning "unset": an activated build dep (ocaml_osx-arm64) exports its own
+# baked CONDA_OCAML_MKEXE, so declining to set it inherited that value - on
+# osx a "<triplet>-gcc" that does not exist, which killed crossopt. Setting
+# it explicitly overrides the inherited value; the :- keeps it safe under
+# set -u, and an empty value still lets the wrapper fall back to the native
+# linker, which is the original intent either way.
 _setup_crossopt_env() {
   export CONDA_OCAML_AS="${CROSS_ASM}"
   export CONDA_OCAML_CC="${CROSS_CC}"
   export CONDA_OCAML_AR="${CROSS_AR}"
   export CONDA_OCAML_RANLIB="${CROSS_RANLIB}"
   export CONDA_OCAML_MKDLL="${CROSS_MKDLL}"
+  export CONDA_OCAML_MKEXE="${NATIVE_MKEXE:-}"
   PATH="${OCAML_PREFIX}/bin:${PATH}"
   hash -r
 }
