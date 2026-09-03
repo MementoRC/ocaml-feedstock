@@ -532,7 +532,7 @@ outputs:
             then: cd testing && ./test-compiler-wrappers.sh
           - if: is_cross_target
             then: cd testing && ./test-compiler-wrappers.sh cross-target
-          - if: not (is_native and unix and not arm64) and not is_cross_target
+          - if: not (is_native and unix) and not is_cross_target
             then: echo "Skipping wrapper tests"
         files:
           recipe:
