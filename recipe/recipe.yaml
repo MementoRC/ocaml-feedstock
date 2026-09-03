@@ -1,5 +1,5 @@
 context:
-  build_number: 8
+  build_number: 9
   name: ocaml
   version: 5.4.0
   flexdll_version: "0.44"
@@ -26,6 +26,7 @@ context:
       "aarch64-conda-linux-gnu"     if cross_target_platform_ == "linux-aarch64"             else
       "powerpc64le-conda-linux-gnu" if cross_target_platform_ == "linux-ppc64le"             else
       "riscv64-conda-linux-gnu"     if cross_target_platform_ == "linux-riscv64"             else
+      "s390x-conda-linux-gnu" if cross_target_platform_ == "linux-s390x" else
       "x86_64-apple-darwin13.4.0"   if cross_target_platform_ == "osx-64"                    else
       "arm64-apple-darwin20.0.0"    if cross_target_platform_ == "osx-arm64"                 else
       "x86_64-w64-mingw32"          if cross_target_platform_ == "win-64" and c_compiler == "gcc" else
@@ -67,6 +68,13 @@ source:
       # The macros were guarded by CAML_INTERNALS, but public headers include
       # camlatomic.h, setting the include guard before CAML_INTERNALS is defined.
       - patches/fix-camlatomic-include-order.patch
+      # s390x: the PLT lazy-binding trampoline clobbers registers while %r15 points
+      # at an OCaml fiber stack rather than a C stack frame, corrupting the heap.
+      # Call the C-runtime glue (caml_call_gc, caml_c_call, caml_alloc1/2/3/N,
+      # caml_raise_exn, caml_call_realloc_stack, ...) GOT-indirect via lgrl/basr
+      # instead of PLT-relative brasl. Upstream ocaml/ocaml#13693.
+      # Touches only asmcomp/s390x/emit.mlp, so it is a no-op on other targets.
+      - patches/s390x-got-indirect-plt.patch
       # Only apply on Unix - Windows uses flexlink which shouldn't be overridden
       - if: unix
         then: patches/0002-ocamlmklib-conda-env-vars.patch
@@ -231,7 +239,13 @@ outputs:
                 - ocaml_${{ build_platform }} ${{ version }}.*
             - if: linux
               then:
-                - ${{ c_compiler }}_impl_${{ cross_target_platform_ }} ${{ c_compiler_version }}*
+                # conda-forge has no gcc_impl_linux-s390x above 14, while the
+                # global c_compiler_version is 15. Override for this target only.
+                - if: cross_target_platform_ == "linux-s390x"
+                  then:
+                    - ${{ c_compiler }}_impl_${{ cross_target_platform_ }} 14.*
+                  else:
+                    - ${{ c_compiler }}_impl_${{ cross_target_platform_ }} ${{ c_compiler_version }}*
                 - sysroot_${{ cross_target_platform_ }} ${{ actual_c_stdlib_version }}.*
                 - binutils_impl_${{ cross_target_platform_ }}
                 # qemu-execve-<arch> >=11: the build EMULATES target binaries during
@@ -271,10 +285,17 @@ outputs:
             - llvm-tools ${{ c_compiler_version }}*
 
       host:
-        - zstd
+        # zstd has no linux-s390x build on conda-forge, and build.sh's [zstd-probe]
+        # already configures OCaml --without-zstd for that target. Declaring it here
+        # unconditionally makes the s390x lanes unsolvable before the build even runs.
+        - if: cross_target_platform_ != "linux-s390x"
+          then:
+            - zstd
 
       run:
-        - zstd
+        - if: cross_target_platform_ != "linux-s390x"
+          then:
+            - zstd
         # OCaml needs a C compiler at runtime — ocamlopt, conda-ocaml-mkexe,
         # conda-ocaml-mkdll all invoke the C compiler. Must use the activating
         # metapackages (not _impl) because _impl doesn't put tools in PATH.
@@ -304,7 +325,14 @@ outputs:
           then:
             - if: linux
               then:
-                - gcc_impl_${{ cross_target_platform_ }} >=${{ c_compiler_version }}
+                # conda-forge has no gcc_impl_linux-s390x above 14, while the global
+                # c_compiler_version is 15. Mirror the build-side override at ~line 238
+                # so the shipped package does not require a gcc that cannot exist.
+                - if: cross_target_platform_ == "linux-s390x"
+                  then:
+                    - gcc_impl_${{ cross_target_platform_ }} >=14
+                  else:
+                    - gcc_impl_${{ cross_target_platform_ }} >=${{ c_compiler_version }}
                 - binutils_impl_${{ cross_target_platform_ }}
               else:
                 - clang_impl_${{ cross_target_platform_ }} >=${{ c_compiler_version }}

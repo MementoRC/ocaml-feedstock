@@ -133,6 +133,7 @@ get_target_arch() {
     aarch64-*|arm64-*) echo "arm64" ;;
     powerpc64le-*) echo "power" ;;
     riscv64-*) echo "riscv" ;;
+    s390x-*) echo "s390x" ;;
     x86_64-*|*-x86_64-*) echo "amd64" ;;
     *) echo "amd64" ;;  # default
   esac
@@ -148,6 +149,7 @@ get_target_platform() {
     arm64-*) echo "osx-arm64" ;;
     powerpc64le-*) echo "linux-ppc64le" ;;
     riscv64-*) echo "linux-riscv64" ;;
+    s390x-*) echo "linux-s390x" ;;
     x86_64-conda-linux-gnu) echo "linux-64" ;;
     x86_64-apple-darwin*) echo "osx-64" ;;
     *) echo "amd64" ;;  # default
@@ -388,6 +390,15 @@ setup_cflags_ldflags() {
       export "${name}_CFLAGS=-ftree-vectorize -fPIC -fstack-protector-strong -O2 -pipe -isystem ${PREFIX}/include"
       export "${name}_LDFLAGS=-Wl,-O2 -Wl,--sort-common -Wl,--as-needed -Wl,-z,relro -Wl,-z,now -Wl,--allow-shlib-undefined -Wl,-rpath,${PREFIX}/lib -Wl,-rpath-link,${PREFIX}/lib -L${PREFIX}/lib"
       ;;
+    CROSS_linux-64_linux-s390x)
+      # Cross-compiling FOR Linux s390x
+      # Use -fno-plt to emit GOT-indirect calls for libc (avoids _dl_runtime_resolve_vx
+      # PLT trampoline corrupting OCaml's fiber heap stack - complements upstream PR #14547
+      # which covers OCaml-generated runtime calls; this covers the C-side gap).
+      export "${name}_CFLAGS=-ftree-vectorize -fPIC -fstack-protector-strong -O2 -pipe -march=z13 -mzarch -fno-plt -isystem ${PREFIX}/include"
+      export "${name}_LDFLAGS=-Wl,-O2 -Wl,--as-needed -Wl,-z,relro -Wl,-z,now -L${PREFIX}/lib"
+      export "${name}_ASPPFLAGS=-march=z13 -mzarch -fno-plt"
+      ;;
     CROSS_osx-64_osx-arm64)
       # Cross-compiling FOR macOS ARM64 (on osx-64)
       # ALWAYS use clean generic flags - conda-build's CFLAGS is often corrupted
@@ -417,7 +428,7 @@ setup_cflags_ldflags() {
       export "${name}_CFLAGS=-ftree-vectorize -fPIC -fstack-protector-strong -O2 -pipe -isystem ${BUILD_PREFIX}/include"
       export "${name}_LDFLAGS=-fuse-ld=lld -L${BUILD_PREFIX}/lib -Wl,-headerpad_max_install_names -Wl,-dead_strip_dylibs"
       ;;
-    NATIVE_linux-64_linux-aarch64|NATIVE_linux-64_linux-ppc64le|NATIVE_linux-64_linux-riscv64)
+    NATIVE_linux-64_linux-aarch64|NATIVE_linux-64_linux-ppc64le|NATIVE_linux-64_linux-riscv64|NATIVE_linux-64_linux-s390x)
       # Native OCaml build during cross-platform CI (runs on x86_64 BUILD machine)
       export "${name}_CFLAGS=-march=nocona -mtune=haswell -ftree-vectorize -fPIC -fstack-protector-strong -fno-plt -O2 -ffunction-sections -pipe -isystem ${BUILD_PREFIX}/include"
       export "${name}_LDFLAGS=-Wl,-O2 -Wl,--sort-common -Wl,--as-needed -Wl,-z,relro -Wl,-z,now -Wl,--disable-new-dtags -Wl,--gc-sections -Wl,-rpath,${BUILD_PREFIX}/lib -Wl,-rpath-link,${BUILD_PREFIX}/lib -L${BUILD_PREFIX}/lib"

@@ -31,6 +31,7 @@ get_target_arch() {
     aarch64-*|arm64-*) echo "arm64" ;;
     powerpc64le-*) echo "power" ;;
     riscv64-*) echo "riscv" ;;
+    s390x-*) echo "s390x" ;;
     x86_64-*|*-x86_64-*) echo "amd64" ;;
     *) echo "amd64" ;;  # default
   esac
@@ -45,6 +46,7 @@ get_target_id() {
     aarch64-conda-linux-gnu) echo "AARCH64" ;;
     powerpc64le-conda-linux-gnu) echo "PPC64LE" ;;
     riscv64-conda-linux-gnu) echo "RISCV64" ;;
+    s390x-conda-linux-gnu) echo "S390X" ;;
     arm64-apple-darwin*) echo "ARM64" ;;
     x86_64-conda-linux-gnu|x86_64-apple-darwin*) echo "X86_64" ;;
     *) echo "${target}" | cut -d'-' -f1 | tr '[:lower:]' '[:upper:]' ;;
@@ -227,6 +229,14 @@ TESTEOF
           TEST_ERRORS=$((TEST_ERRORS + 1))
         fi
         ;;
+      s390x)
+        if echo "$_file_output" | grep -qiE "IBM S/390|S/390|s390"; then
+          echo "    ✓ Produces s390x binaries"
+        else
+          echo "    ✗ ERROR: Expected s390x, got: $_file_output"
+          TEST_ERRORS=$((TEST_ERRORS + 1))
+        fi
+        ;;
       amd64)
         if echo "$_file_output" | grep -qi "x86-64\|x86_64"; then
           echo "    ✓ Produces x86_64 binaries"
@@ -299,6 +309,14 @@ TESTEOF
               power)
                 if echo "${rtlib_arch}" | grep -qi "powerpc\|ppc64"; then
                   echo "    ✓ ${rtname}: PowerPC64"
+                else
+                  echo "    ✗ ERROR: ${rtname} has wrong architecture: ${rtlib_arch}"
+                  TEST_ERRORS=$((TEST_ERRORS + 1))
+                fi
+                ;;
+              s390x)
+                if echo "${rtlib_arch}" | grep -qi "s390|S/390"; then
+                  echo "    ✓ ${rtname}: s390x"
                 else
                   echo "    ✗ ERROR: ${rtname} has wrong architecture: ${rtlib_arch}"
                   TEST_ERRORS=$((TEST_ERRORS + 1))
@@ -423,6 +441,10 @@ CONSEOF
         ;;
       powerpc64le-conda-linux-gnu)
         EXPECTED_PREFIX="powerpc64le"
+        WRONG_PREFIX="x86_64"
+        ;;
+      s390x-conda-linux-gnu)
+        EXPECTED_PREFIX="s390x"
         WRONG_PREFIX="x86_64"
         ;;
       arm64-apple-darwin*)
@@ -809,6 +831,11 @@ if [[ -n "$TARGET_TRIPLE" ]]; then
       QEMU_PREFIX="${PREFIX}/powerpc64le-conda-linux-gnu/sysroot"
       ARCH_NAME="Linux PPC64LE"
       ;;
+    s390x-conda-linux-gnu)
+      QEMU_CMD="qemu-execve-s390x"
+      QEMU_PREFIX="${PREFIX}/s390x-conda-linux-gnu/sysroot"
+      ARCH_NAME="Linux S390X"
+      ;;
     arm64-apple-darwin*)
       QEMU_CMD=""
       QEMU_PREFIX=""
@@ -871,6 +898,24 @@ else
 
     # Test environment variable override for ppc64le
     if test_toolchain_env_vars "powerpc64le-conda-linux-gnu"; then
+      :
+    else
+      TOTAL_ERRORS=$((TOTAL_ERRORS + 1))
+    fi
+
+    # Test s390x cross-compiler
+    if test_cross_compiler \
+      "s390x-conda-linux-gnu" \
+      "Linux S390X" \
+      "qemu-execve-s390x" \
+      "${PREFIX}/s390x-conda-linux-gnu/sysroot"; then
+      :
+    else
+      TOTAL_ERRORS=$((TOTAL_ERRORS + 1))
+    fi
+
+    # Test environment variable override for s390x
+    if test_toolchain_env_vars "s390x-conda-linux-gnu"; then
       :
     else
       TOTAL_ERRORS=$((TOTAL_ERRORS + 1))
