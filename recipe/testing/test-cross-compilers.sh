@@ -780,8 +780,8 @@ echo "Target platform: ${TARGET_PLATFORM:-same as build}"
 echo ""
 
 # Only run on native x86_64 platforms where cross-compilers are built
-if [[ "$BUILD_PLATFORM" != "linux-64" ]] && [[ "$BUILD_PLATFORM" != "osx-64" ]]; then
-  echo "Cross-compilers only built on linux-64 and osx-64, skipping"
+if [[ "$BUILD_PLATFORM" != "linux-64" ]] && [[ "$BUILD_PLATFORM" != "osx-64" ]] && [[ "$BUILD_PLATFORM" != "osx-arm64" ]]; then
+  echo "Cross-compilers only built on linux-64, osx-64 and osx-arm64, skipping"
   exit 0
 fi
 
