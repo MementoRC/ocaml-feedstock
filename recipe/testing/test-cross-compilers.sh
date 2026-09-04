@@ -315,7 +315,7 @@ TESTEOF
                 fi
                 ;;
               s390x)
-                if echo "${rtlib_arch}" | grep -qi "s390|S/390"; then
+                if echo "${rtlib_arch}" | grep -qiE "s390|S/390"; then
                   echo "    ✓ ${rtname}: s390x"
                 else
                   echo "    ✗ ERROR: ${rtname} has wrong architecture: ${rtlib_arch}"
