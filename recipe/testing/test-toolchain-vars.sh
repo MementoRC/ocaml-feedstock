@@ -3,6 +3,21 @@
 # This test verifies that ocamlopt respects custom CC/AS/AR settings
 set -euo pipefail
 
+# Run a TARGET binary. Under cross-emulation OCAML_QEMU is the emulator
+# (e.g. qemu-execve-ppc64le) and we resolve the binary to an absolute path,
+# because the emulator does not do PATH lookup. When OCAML_QEMU is empty
+# (all native lanes) this is exactly equivalent to running the command directly.
+_run_target() {
+  local _cmd="$1"; shift
+  if [ -n "${OCAML_QEMU:-}" ]; then
+    local _p
+    _p="$(command -v "${_cmd}")" || { echo "ERROR: ${_cmd} not found in PATH" >&2; return 1; }
+    "${OCAML_QEMU}" "${_p}" "$@"
+  else
+    "${_cmd}" "$@"
+  fi
+}
+
 echo "=== Test: CONDA_OCAML_* Toolchain Variables ==="
 
 # Test 1: Verify activation script sets defaults
@@ -28,8 +43,8 @@ echo "PASS: All CONDA_OCAML_* variables are set"
 echo ""
 echo "Test 2: ocamlopt -config uses conda-ocaml-* wrapper scripts"
 
-CONFIG_CC=$(ocamlopt -config-var c_compiler)
-CONFIG_ASM=$(ocamlopt -config-var asm)
+CONFIG_CC=$(_run_target ocamlopt -config-var c_compiler)
+CONFIG_ASM=$(_run_target ocamlopt -config-var asm)
 
 echo "  c_compiler = $CONFIG_CC"
 echo "  asm = $CONFIG_ASM"
@@ -113,7 +128,7 @@ fi
 > "$TESTDIR/cc.log"
 cd "$TESTDIR"
 
-if ocamlopt -o hello hello.ml 2>&1; then
+if _run_target ocamlopt -o hello hello.ml 2>&1; then
     echo "  Compilation succeeded"
 
     # Check if wrapper was called
@@ -125,7 +140,7 @@ if ocamlopt -o hello hello.ml 2>&1; then
 
     # Run the compiled program
     echo "  Running compiled program:"
-    ./hello
+    _run_target ./hello
 else
     echo "FAIL: Compilation failed with custom CC"
     exit 1
@@ -143,9 +158,9 @@ fi
 echo "  CONDA_OCAML_CC = ${CONDA_OCAML_CC:-<not set>}"
 
 cd "$TESTDIR"
-if ocamlopt -o hello2 hello.ml 2>&1; then
+if _run_target ocamlopt -o hello2 hello.ml 2>&1; then
     echo "PASS: Compilation works with default CC"
-    ./hello2
+    _run_target ./hello2
 else
     echo "FAIL: Compilation failed with default CC"
     exit 1
