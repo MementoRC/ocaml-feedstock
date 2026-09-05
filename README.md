@@ -102,10 +102,10 @@ Current release info
 Installing ocaml-compiler
 =========================
 
-Installing `ocaml-compiler` from the `conda-forge` channel can be achieved by adding `conda-forge` to your channels with:
+Installing `ocaml-compiler` from the `conda-forge/label/ocaml_experimental` channel can be achieved by adding `conda-forge/label/ocaml_experimental` to your channels with:
 
 ```
-conda config --add channels conda-forge
+conda config --add channels conda-forge/label/ocaml_experimental
 conda config --set channel_priority strict
 ```
 
@@ -151,7 +151,7 @@ It is possible to list all of the versions of `ocaml` available on your platform
 <summary>With conda</summary>
 
 ```
-conda search ocaml --channel conda-forge
+conda search ocaml --channel conda-forge/label/ocaml_experimental
 ```
 
 </details>
@@ -160,7 +160,7 @@ conda search ocaml --channel conda-forge
 <summary>With mamba</summary>
 
 ```
-mamba search ocaml --channel conda-forge
+mamba search ocaml --channel conda-forge/label/ocaml_experimental
 ```
 
 </details>
@@ -169,7 +169,7 @@ mamba search ocaml --channel conda-forge
 <summary>With pixi</summary>
 
 ```
-pixi search ocaml --channel conda-forge
+pixi search ocaml --channel conda-forge/label/ocaml_experimental
 ```
 
 </details>
@@ -179,13 +179,13 @@ pixi search ocaml --channel conda-forge
 
 ```
 # Search all versions available on your platform:
-mamba repoquery search ocaml --channel conda-forge
+mamba repoquery search ocaml --channel conda-forge/label/ocaml_experimental
 
 # List packages depending on `ocaml`:
-mamba repoquery whoneeds ocaml --channel conda-forge
+mamba repoquery whoneeds ocaml --channel conda-forge/label/ocaml_experimental
 
 # List dependencies of `ocaml`:
-mamba repoquery depends ocaml --channel conda-forge
+mamba repoquery depends ocaml --channel conda-forge/label/ocaml_experimental
 ```
 
 </details>
