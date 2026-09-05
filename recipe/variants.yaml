@@ -1,3 +1,8 @@
+channel_sources:
+  - conda-forge/label/ocaml_experimental,conda-forge/label/zig_experimental,conda-forge
+channel_targets:
+  - conda-forge ocaml_experimental
+
 c_compiler:
   - if: not unix
     then:
@@ -5,32 +10,15 @@ c_compiler:
       - gcc
       - zig
 
-c_compiler_version:
-  - if: not unix
-    then:
-      - 19
-
-c_stdlib:
-  - if: not unix
-    then:
-      - vs
-
-c_stdlib_version:
-  - if: not unix
-    then:
-      - "2022.14"
-
-m2w64_c_stdlib:
-  - m2w64-sysroot
-
-m2w64_c_stdlib_version:
-  - 12
-
+# PR103: restore the local pin deleted by the "(ref) set channels" commit. Without it this
+# key falls back to the conda-forge-pinning global default of 15, so the win-64 gcc lane
+# solves for `gcc_win-64 15.*` while m2w64-sysroot's run_export demands
+# `gcc_win-64 ==14.4.0`, giving "Failed to resolve dependencies". Deliberately NOT
+# restoring the other keys that commit removed (c_compiler_version, c_stdlib,
+# c_stdlib_version, m2w64_c_stdlib, m2w64_c_stdlib_version, vc) - the vs2022 lane is
+# green without them and the solver names only gcc_win-64.
 m2w64_c_compiler_version:
   - "14"
-
-vc:
-  - 14
 
 cross_target_platform_:
   - linux-64

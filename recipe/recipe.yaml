@@ -139,9 +139,6 @@ source:
           # (GetSystemInfo, VirtualQuery, VirtualProtect) inside caml_reset_stack,
           # causing STATUS_STACK_OVERFLOW recursion via caml_stack_overflow_VEH.
           - patches/increase-win32-alt-stack.patch
-          # PR97 W5M-N: reentrancy guard on caml_try_realloc_stack to detect/break
-          # infinite recursion observed under Win64-zig (F1+F2 mutual recursion).
-          - patches/add-realloc-stack-reentrancy-guard.patch
   - if: not unix
     then:
       url: https://github.com/ocaml/flexdll/archive/refs/tags/${{ flexdll_version }}.tar.gz
@@ -716,16 +713,21 @@ outputs:
           recipe:
             - testing/test-package-integrity.${{ sh }}
         requirements:
+          # PR103: file/grep are HOST-SIDE utilities - test-package-integrity.sh uses them to
+          # INSPECT target binaries, it does not run them on the target. They must stay under
+          # build: (solved against build_platform) as in the green baseline 0e1d2415. The port
+          # moved them to run:, which solves against target_platform and fails on
+          # linux-riscv64 with "No candidates were found for file *". Unconditional here, as
+          # in the baseline: a build-platform dep is resolvable on every lane including
+          # win-arm64, so the previous "not arm64" guard is unnecessary under build:.
+          build:
+            - ${{ m2 }}file
+            - ${{ m2 }}grep
           run:
             # Use _impl to avoid activation script noise in test output
             - if: unix
               then:
                 - binutils_impl_${{ target_platform }}
-            # Use native grep on arm64 since no QEMU
-            - if: not arm64
-              then:
-                - ${{ m2 }}file
-                - ${{ m2 }}grep
 
       # ----------------------------------------------------------------------
       # CROSS-TARGET: Cross-compiled binary architecture verification
@@ -951,7 +953,6 @@ outputs:
         files:
           recipe:
             - testing/test-compilation.${{ sh }}
-            - testing/w4ii_symbolize.py
         requirements:
           build:
             - ${{ qemu_pin }}

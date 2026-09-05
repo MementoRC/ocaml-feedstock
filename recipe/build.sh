@@ -129,7 +129,7 @@ fi
 echo ""
 echo "============================================================"
 echo "OCaml Build Script - Mode Detection"
-echo "  BUILD_SCRIPT_VERSION: 2026-08-30A-W11A-zig-exec-probe-build14-sigill"
+echo "  BUILD_SCRIPT_VERSION: 2026-09-05A-PR103-archcheck-amd64-s390x-portable-crossopt-timeout"
 echo "============================================================"
 
 # ============================================================================
@@ -10746,6 +10746,27 @@ ARSHEOF
         _crossopt_timeout_s=1800
       fi
 
+      # PR103: GNU coreutils `timeout` does NOT exist on macOS runners (it ships as
+      # `gtimeout`). Both crossopt call sites below passed `timeout` straight to
+      # run_logged as its command, so run_logged's `"$cmd" "$@"` returned 127
+      # ("timeout: command not found") before make crossopt ever started, and
+      # set -euo pipefail turned that into a hard failure on every osx cross lane.
+      # Resolve an OPTIONAL prefix the same way the _w5o_to sites above already do:
+      # when no timeout binary exists the array is empty, run_logged's command
+      # becomes `env`, and the step runs untimed rather than failing.
+      # Built AFTER the win-arm64 override so it uses the final _crossopt_timeout_s.
+      _crossopt_to_ka=()   # with --kill-after (win-arm64 hang guard, W25)
+      _crossopt_to=()      # plain
+      if command -v timeout >/dev/null 2>&1; then
+        _crossopt_to_ka=(timeout --kill-after=120 "${_crossopt_timeout_s}")
+        _crossopt_to=(timeout "${_crossopt_timeout_s}")
+      elif command -v gtimeout >/dev/null 2>&1; then
+        _crossopt_to_ka=(gtimeout --kill-after=120 "${_crossopt_timeout_s}")
+        _crossopt_to=(gtimeout "${_crossopt_timeout_s}")
+      else
+        echo "  [PR103] no timeout/gtimeout on PATH - running crossopt untimed"
+      fi
+
       # W26 2026-07-11: live [CROSSOPT-STAGE] heartbeat. run_logged redirects make's
       # stdout into ${LOG_DIR}/crossopt.log, so the console is silent during a hang.
       # This background poller echoes the last [CROSSOPT-STAGE] marker to the CONSOLE
@@ -10897,7 +10918,7 @@ ARSHEOF
 
         _crossopt_rc=0
         echo "[ZIG13-P2-TRACE-BEGIN]" || true
-        run_logged "crossopt" timeout --kill-after=120 "${_crossopt_timeout_s}" env "PATH=${_v05_03AS_dir}${_v05_03AS_dir:+:}${BUILD_PREFIX}/Library/bin:${PATH}" "OCAML_FLEXLINK=${_v05_03j_flexlink}" ${_w31_flexdll_env[@]+"${_w31_flexdll_env[@]}"} ${_w33_build_prefix_env[@]+"${_w33_build_prefix_env[@]}"} "${MAKE[@]}" crossopt "${CROSSOPT_ARGS[@]}" -j"${_ocaml_make_jobs}" || _crossopt_rc=$?
+        run_logged "crossopt" ${_crossopt_to_ka[@]+"${_crossopt_to_ka[@]}"} env "PATH=${_v05_03AS_dir}${_v05_03AS_dir:+:}${BUILD_PREFIX}/Library/bin:${PATH}" "OCAML_FLEXLINK=${_v05_03j_flexlink}" ${_w31_flexdll_env[@]+"${_w31_flexdll_env[@]}"} ${_w33_build_prefix_env[@]+"${_w33_build_prefix_env[@]}"} "${MAKE[@]}" crossopt "${CROSSOPT_ARGS[@]}" -j"${_ocaml_make_jobs}" || _crossopt_rc=$?
         echo "[ZIG13-P2-TRACE-END]" || true
         # ====================================================================
         # W9B 2026-07-22E DIAGNOSTIC-ONLY (no behaviour change): same probe as
@@ -10968,7 +10989,7 @@ ARSHEOF
         # The wrappers ship at $BUILD_PREFIX/share/zig/wrappers/ but zig's activate.d only
         # exports ZIG_CC/ZIG_AR env vars, not PATH (so the dir isn't otherwise on PATH).
         _crossopt_rc=0
-        run_logged "crossopt" timeout "${_crossopt_timeout_s}" env "PATH=${BUILD_PREFIX}/share/zig/wrappers:${PATH}" "${MAKE[@]}" crossopt "${CROSSOPT_ARGS[@]}" -j"${_ocaml_make_jobs}" || _crossopt_rc=$?
+        run_logged "crossopt" ${_crossopt_to[@]+"${_crossopt_to[@]}"} env "PATH=${BUILD_PREFIX}/share/zig/wrappers:${PATH}" "${MAKE[@]}" crossopt "${CROSSOPT_ARGS[@]}" -j"${_ocaml_make_jobs}" || _crossopt_rc=$?
         if [[ -n "${_w22_procmon_pid}" ]]; then
           kill "${_w22_procmon_pid}" 2>/dev/null || true
           echo "[W22-DIAG] crossopt process-snapshot poller stopped (pid ${_w22_procmon_pid})"
@@ -11310,11 +11331,19 @@ EOF
         fi
         echo "    libasmrun.a object: $_arch_info"
         # Check architecture matches target (use | not \| with grep -E)
+        # PR103: every arm below maps CROSS_ARCH to the strings readelf/lipo actually
+        # print, because the catch-all compares against the literal CROSS_ARCH token,
+        # which never appears in that output. amd64 and s390x had no arm, so every
+        # amd64-target cross lane failed this check with a CORRECT libasmrun.a
+        # ("Expected: amd64, Got: Advanced Micro Devices X86-64"), and s390x would
+        # fail identically against "IBM S/390". grep -qiE below is case-insensitive.
         case "${CROSS_ARCH}" in
           arm64)   _expected="arm64|ARM64|AArch64|aarch64" ;;
           aarch64) _expected="AArch64|aarch64|arm64|ARM64" ;;
+          amd64|x86_64) _expected="x86-64|x86_64|amd64" ;;
           power)   _expected="PowerPC|ppc64" ;;
           riscv)   _expected="RISC-V|RISCV|riscv" ;;
+          s390x)   _expected="IBM S/390|S/390|s390" ;;
           *)       _expected="${CROSS_ARCH}" ;;
         esac
         if ! echo "$_arch_info" | grep -qiE "$_expected"; then
