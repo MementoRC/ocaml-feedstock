@@ -647,6 +647,34 @@ outputs:
                     - ${{ library }}lib/ocaml/libunix{byt,nat}.lib
                     - ${{ library }}lib/ocaml/std_exit.obj
                     - ${{ library }}lib/ocaml/stdlib.lib
+                # PR103 2026-09-05: the c_compiler != "zig" guard at :637 excluded the
+                # zig/win native lane from ALL of the Windows artifact declarations
+                # below, so package_contents strict mode reported 54 unmatched files
+                # (job 101366676783, "Strict mode: 54 unmatched files found").
+                # zig ships the same MSVC-style .lib set as vs2022, but with MINGW-named
+                # flexdll objects, plus the zig wrapper scripts, .pdb files, the
+                # x86_64 import libs and the flexlinkflags activation scripts.
+                - if: not unix and c_compiler == "zig"
+                  then:
+                    - ${{ library }}lib/ocaml/flexdll/flexdll_initer_mingw64.obj
+                    - ${{ library }}lib/ocaml/flexdll/flexdll_mingw64.obj
+                    - ${{ library }}lib/ocaml/libasm{run,rund,runi}.lib
+                    - ${{ library }}lib/ocaml/libcaml{run,rund,runi}.lib
+                    - ${{ library }}lib/ocaml/libcamlruntime_{eventsbyt,eventsnat}.lib
+                    - ${{ library }}lib/ocaml/libcamlstr{byt,nat}.lib
+                    - ${{ library }}lib/ocaml/libcomprmarsh.lib
+                    - ${{ library }}lib/ocaml/libthread{s,snat}.lib
+                    - ${{ library }}lib/ocaml/libunix{byt,nat}.lib
+                    - ${{ library }}lib/ocaml/std_exit.obj
+                    - ${{ library }}lib/ocaml/stdlib.lib
+                    - ${{ library }}lib/ocaml-x86_64-imports/*.a
+                    - ${{ library }}bin/conda-ocaml-{ar,as,cc,ld,ranlib,windres}.pdb
+                    - ${{ library }}bin/ocamlruni.exe
+                    - ${{ library }}bin/x86_64-w64-mingw32-gcc.{bat,exe}
+                    - ${{ library }}bin/zig_{ar,ranlib}_wrapper.sh
+                    - ${{ library }}bin/zig_aspp_wrapper.{bat,sh}
+                    - etc/conda/activate.d/ocaml-flexlinkflags.bat
+                    - etc/conda/deactivate.d/ocaml-flexlinkflags.bat
                 - if: unix
                   then:
                     - ${{ library }}lib/ocaml/libasmrun_shared.so
@@ -749,7 +777,7 @@ outputs:
       # NATIVE: Tool version checks
       # ----------------------------------------------------------------------
       - script:
-          - if: is_native and not arm64
+          - if: is_native and not xc_warm64
             then: cd testing && ${{ dot }}test-tool-versions.${{ sh }} ${{ version }}
             else: echo "Skipping tool version tests"
         files:
@@ -758,7 +786,7 @@ outputs:
         requirements:
           run:
             # Use native grep on arm64 since no QEMU
-            - if: not arm64
+            - if: not xc_warm64
               then:
                 - ${{ m2 }}grep
 
@@ -775,7 +803,7 @@ outputs:
         requirements:
           run:
             # Use native grep on arm64 since no QEMU
-            - if: not arm64
+            - if: not xc_warm64
               then:
                 - ${{ m2 }}grep
 
@@ -785,11 +813,11 @@ outputs:
       # on compiler("c") provides the triplet-prefixed binary.
       # ----------------------------------------------------------------------
       - script:
-          - if: is_native and unix and not arm64
+          - if: is_native and unix and not xc_warm64
             then: cd testing && ${{ dot }}test-compiler-wrappers.${{ sh }}
           - if: is_cross_target
             then: cd testing && ${{ dot }}test-compiler-wrappers.${{ sh }} cross-target
-          - if: not (is_native and unix and not arm64) and not is_cross_target
+          - if: not (is_native and unix and not xc_warm64) and not is_cross_target
             then: echo "Skipping wrapper tests"
         files:
           recipe:
@@ -820,8 +848,15 @@ outputs:
           recipe:
             - testing/test-cross-compilers.sh
         requirements:
-          run:
+          # PR103: `file` is a HOST-SIDE utility - test-cross-compilers.sh uses it to INSPECT
+          # target binaries, never to run on the target. Under run: it solved against
+          # target_platform and failed the linux-riscv64 cross-target lane with
+          # "No candidates were found for file *" (that lane skips this test entirely -
+          # script guard is is_cross_compiler - but requirements are solved regardless).
+          # Same fix as the test-package-integrity block above.
+          build:
             - ${{ m2 }}file
+          run:
             - if: linux
               then:
                 # c_stdlib_version tracks target_platform, but this sysroot is for cross_target_platform_.
@@ -947,23 +982,24 @@ outputs:
             then:
               - 'export QEMU_LD_PREFIX="${PREFIX}${{ sysroot }}"'
               - 'export OCAML_QEMU="${{ qemu }}"'
-          - if: not arm64
+              - 'export QEMU_EXECVE_NATIVE_PASSTHROUGH=1'
+          - if: not xc_warm64
             then: cd testing && ${{ dot }}test-compilation.${{ sh }} ${{ version }}
-            else: echo "Skipping compilation tests (osx-arm64 cross-target, no QEMU)"
+            else: echo "Skipping compilation tests (win-arm64 cross-target - cannot execute arm64 Windows binaries on a win-64 host)"
         files:
           recipe:
             - testing/test-compilation.${{ sh }}
         requirements:
           build:
             - ${{ qemu_pin }}
-          run:
             - ${{ m2 }}file
             - ${{ m2 }}grep
+          run:
             - if: linux
               then:
                 - sysroot_${{ cross_target_platform_ }} ${{ c_stdlib_version }}.*
             # W10C (2026-08-30): exclude win-arm64 from the zig TEST requirement.
-            # The test SCRIPT above is already skipped on arm64 (`if: not arm64`
+            # The test SCRIPT above is already skipped on arm64 (`if: not xc_warm64`
             # at :1273 -> the else branch just echoes "Skipping compilation
             # tests"), but this requirements block was NOT gated on arm64, so
             # rattler-build still had to SOLVE zig_win-arm64 for a script that
@@ -993,9 +1029,10 @@ outputs:
             then:
               - 'export QEMU_LD_PREFIX="${PREFIX}${{ sysroot }}"'
               - 'export OCAML_QEMU="${{ qemu }}"'
-          - if: not arm64
+              - 'export QEMU_EXECVE_NATIVE_PASSTHROUGH=1'
+          - if: not xc_warm64
             then: cd testing && ${{ dot }}test-toolchain-vars.${{ sh }}
-            else: echo "Skipping toolchain var tests (osx-arm64 cross-target, no QEMU)"
+            else: echo "Skipping toolchain var tests (win-arm64 cross-target - cannot execute arm64 Windows binaries on a win-64 host)"
         files:
           recipe:
             - testing/test-toolchain-vars.${{ sh }}

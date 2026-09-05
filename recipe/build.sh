@@ -129,7 +129,7 @@ fi
 echo ""
 echo "============================================================"
 echo "OCaml Build Script - Mode Detection"
-echo "  BUILD_SCRIPT_VERSION: 2026-09-05A-PR103-archcheck-amd64-s390x-portable-crossopt-timeout"
+echo "  BUILD_SCRIPT_VERSION: 2026-09-05D-PR103-gate-bootstrap-fallback-nonunix"
 echo "============================================================"
 
 # ============================================================================
@@ -7540,7 +7540,7 @@ SAK_WINMAIN_STUB
     # Ensure boot/ has ocamlrun + ocamlc — flexdll build needs them to compile flexlink.exe.
     # For cross-compilation, use the installed native OCaml from BUILD_PREFIX.
     mkdir -p boot
-    if [[ ! -f boot/ocamlrun.exe ]]; then
+    if ! is_unix && [[ ! -f boot/ocamlrun.exe ]]; then
       local _ocaml_bin="${BUILD_PREFIX}/Library/bin"
       [[ -f "${_ocaml_bin}/ocamlrun.exe" ]] || _ocaml_bin="${BUILD_PREFIX}/bin"
       for _tool in ocamlrun ocamlc ocamllex; do
@@ -12475,7 +12475,13 @@ if [[ "${BUILD_MODE}" == "cross-target" ]]; then
   fi
 
   # First-build bootstrap fallback for new arches (rare path; isolated in its own file)
-  if [[ ! -f "${CROSS_COMPILER_DIR}/lib/ocaml/stdlib.cma" ]] && [[ -f "${RECIPE_DIR}/building/bootstrap-fallback-cross-target.sh" ]]; then
+  # PR103 2026-09-05: gate the bootstrap fallback to NON-UNIX. This script and its
+  # call site arrived with the win-arm64 port (3b2fbf86) and the call site carried no
+  # platform guard, so on the osx-64 cross-target lane the "first-build path" branch
+  # fired (CI log 103b-osx64.log:2035-4399) and rebuilt a cross-compiler from scratch
+  # via build_cross_compiler(). The green baseline 0e1d2415 has no such script and
+  # goes straight through build_cross_target(). Restoring that behaviour on unix.
+  if ! is_unix && [[ ! -f "${CROSS_COMPILER_DIR}/lib/ocaml/stdlib.cma" ]] && [[ -f "${RECIPE_DIR}/building/bootstrap-fallback-cross-target.sh" ]]; then
       source "${RECIPE_DIR}/building/bootstrap-fallback-cross-target.sh"
       bootstrap_cross_target_from_inline
   fi
