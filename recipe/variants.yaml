@@ -1,9 +1,9 @@
-# Recipe-specific variants only; all other keys come from conda-forge-pinning.
-c_compiler:                    # [not unix]
-  - vs2022                     # [not unix]
-  - gcc                        # [not unix]
+c_compiler:
+  - if: not unix
+    then:
+      - vs2022
+      - gcc
 
-# Cross-compile targets; recipe.yaml derives target_platform from this.
 cross_target_platform_:
   - linux-64
   - linux-aarch64
