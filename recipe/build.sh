@@ -609,8 +609,6 @@ build_native() {
   if is_unix; then
     echo "  - Installing conda-ocaml-* wrapper scripts..."
     install_conda_ocaml_wrappers "${OCAML_INSTALL_PREFIX}/bin"
-    # NOTE: macOS ocamlmklib wrapper is created in build.sh AFTER cross-compiler builds
-    # (the native ocamlmklib is used during cross-compiler build and must remain unwrapped)
   else
     # non-unix: Build and install wrapper .exe files
     # These are small C programs that read CONDA_OCAML_* env vars at runtime
@@ -938,7 +936,7 @@ TOOLWRAPPER
       ZSTD_LIBS="-L${BUILD_PREFIX}/lib -lzstd" \
       -j"${CPU_COUNT}"
 
-    # NOTE: stdlib pre-build removed - was causing inconsistent assumptions
+    # NOTE: stdlib must NOT be pre-built here - doing so yields inconsistent assumptions
     # Let crossopt handle stdlib build entirely with consistent variables
 
     # Clean native runtime files so crossopt's runtimeopt rebuilds them for TARGET arch
@@ -1985,15 +1983,3 @@ echo ""
 echo "============================================================"
 echo "Build complete: ${PKG_NAME} (${BUILD_MODE} mode)"
 echo "============================================================"
-
-# ==============================================================================
-# macOS ocamlmklib wrapper: REMOVED
-# ==============================================================================
-# Previously replaced bin/ocamlmklib (bytecode) with a shell wrapper adding
-# -ldopt "-Wl,-undefined,dynamic_lookup". This is REDUNDANT because:
-# 1. config.generated.ml is patched to use conda-ocaml-mkdll as MKDLL
-# 2. CONDA_OCAML_MKDLL already includes -undefined dynamic_lookup on macOS
-# 3. The wrapper broke dependency-based builds (build_number > 0) because
-#    ocamlrun can't read a shell script as bytecode
-# If downstream packages need -undefined dynamic_lookup, it should come through
-# CONDA_OCAML_MKDLL (set by activate.sh), not by wrapping the bytecode binary.
