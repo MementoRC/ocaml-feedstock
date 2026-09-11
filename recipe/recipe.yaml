@@ -302,7 +302,7 @@ outputs:
             # NATIVE: Full native toolset
             - if: is_native
               then:
-                - conda-ocaml-{ar,as,cc,ld,mkdll,mkexe,ranlib}
+                - conda-ocaml-{ar,as,cc,common,ld,mkdll,mkexe,ranlib}
                 - ocaml
                 - ocaml{c,dep,lex,objinfo,opt,mklib,yacc}
                 - ocaml{c,dep,lex,objinfo,opt,mklib,yacc}.opt
@@ -324,7 +324,7 @@ outputs:
             # CROSS-TARGET: Native toolset (no ocamldebug/ocamldoc)
             - if: is_cross_target
               then:
-                - conda-ocaml-{ar,as,cc,ld,mkdll,mkexe,ranlib}
+                - conda-ocaml-{ar,as,cc,common,ld,mkdll,mkexe,ranlib}
                 - ocaml
                 - ocaml{c,dep,lex,objinfo,opt,mklib,yacc}
                 - ocaml{c,dep,lex,objinfo,opt,mklib,yacc}.opt
