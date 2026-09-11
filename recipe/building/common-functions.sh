@@ -949,7 +949,7 @@ check_unix_crc() {
     | grep -E "^\s+[a-f0-9]+\s+Unix$" | awk '{print $1}' | head -1)
 
   if [[ "${unix_crc}" == "${threads_crc}" && -n "${unix_crc}" ]]; then
-    echo "    [PASS] ${label}: unix CRC match (${unix_crc})"
+    echo "    [OK] ${label}: unix CRC match (${unix_crc})"
   else
     echo "    [FAIL] ${label}: unix CRC mismatch"
     echo "           unix.cmxa    CRC: ${unix_crc:-<empty>}"

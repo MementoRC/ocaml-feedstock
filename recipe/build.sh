@@ -1234,12 +1234,12 @@ EOF
           *) _expected="${CROSS_ARCH}" ;;
         esac
         if ! echo "$_arch_info" | grep -qiE "$_expected"; then
-          echo "    [fail] ERROR: libasmrun.a has WRONG architecture!"
+          echo "    [FAIL] ERROR: libasmrun.a has WRONG architecture!"
           echo "    Expected: ${CROSS_ARCH}, Got: $_arch_info"
           rm -rf "$_tmpdir"
           exit 1
         fi
-        echo "    [ok] Architecture verified: ${CROSS_ARCH}"
+        echo "    [OK] Architecture verified: ${CROSS_ARCH}"
       fi
       rm -rf "$_tmpdir"
     else
@@ -1298,9 +1298,9 @@ EOF
     CROSS_OCAMLOPT="${OCAML_INSTALL_PREFIX}/bin/${target}-ocamlopt"
 
     if "${CROSS_OCAMLOPT}" -version | grep -q "${PKG_VERSION}"; then
-      echo "    [ok] Version check passed"
+      echo "    [OK] Version check passed"
     else
-      echo "    [fail] ERROR: Version mismatch"
+      echo "    [FAIL] ERROR: Version mismatch"
       exit 1
     fi
 
