@@ -110,7 +110,7 @@ find_tool() {
 # ==============================================================================
 
 # Get target ID from triplet (for CONDA_OCAML_<TARGET_ID>_* variables)
-# Usage: get_target_id "aarch64-conda-linux-gnu" → "AARCH64"
+# Usage: get_target_id "aarch64-conda-linux-gnu" -> "AARCH64"
 get_target_id() {
   local target="$1"
   
@@ -124,7 +124,7 @@ get_target_id() {
 }
 
 # Get target architecture for OCaml ARCH variable
-# Usage: get_target_arch "aarch64-conda-linux-gnu" → "arm64"
+# Usage: get_target_arch "aarch64-conda-linux-gnu" -> "arm64"
 get_target_arch() {
   local target="$1"
   
@@ -137,7 +137,7 @@ get_target_arch() {
 }
 
 # Get target platform from triplet
-# Usage: get_target_platform "aarch64-conda-linux-gnu" → "linux-aarch64"
+# Usage: get_target_platform "aarch64-conda-linux-gnu" -> "linux-aarch64"
 get_target_platform() {
   local target="$1"
   
@@ -331,8 +331,8 @@ sanitize_and_export_cross_flags() {
 }
 
 # Get target architecture from conda target triplet or platform
-# Usage: get_arch_from_triplet "aarch64-conda-linux-gnu" → "aarch64"
-# Usage: get_arch_from_platform "linux-aarch64" → "aarch64"
+# Usage: get_arch_from_triplet "aarch64-conda-linux-gnu" -> "aarch64"
+# Usage: get_arch_from_platform "linux-aarch64" -> "aarch64"
 get_arch_for_sanitization() {
   local input="$1"
 
@@ -693,7 +693,7 @@ clean_runtime_launch_info() {
   #
   # Format:
   #   Line 1: launch method ("sh" or "exe") + \n
-  #   Line 2: BINDIR path + \000 + \n    ← null-terminated! This is intentional.
+  #   Line 2: BINDIR path + \000 + \n    <- null-terminated! This is intentional.
   #   Rest:   compiled stub binary (header.exe)
   #
   # BINDIR is used by ocamlc at LINK TIME to construct #!/BINDIR/ocamlrun shebangs
