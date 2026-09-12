@@ -761,11 +761,26 @@ patch_checkstack_cc() {
 # Operates on Makefile.config in the current directory
 patch_makefile_config_post_configure() {
   local config_file="Makefile.config"
+  local keep='@@OCAML_RELOC_L@@'
 
-  sed -i  's#-fdebug-prefix-map=[^ ]*##g' "${config_file}"
-  sed -i  's#-link\s+-L[^ ]*##g' "${config_file}"                             # Remove flexlink's "-link -L..." patterns
-  sed -i  's#-L[^ ]*##g' "${config_file}"                                     # Remove standalone -L paths
-  # These would be found in BUILD_PREFIX and fail relocation
+  sed -i 's#-fdebug-prefix-map=[^ ]*##g' "${config_file}"
+
+  # configure bakes in -L paths that do not exist for a consumer of the
+  # installed package. Paths under PREFIX are the exception: conda rewrites
+  # PREFIX at install time, and -L${PREFIX}/lib is what keeps zstd resolvable
+  # for -output-complete-exe links. Protect those, strip the rest, restore.
+  if [[ -n "${PREFIX:-}" ]]; then
+    sed -i "s#-L${PREFIX}#${keep}#g" "${config_file}"
+  fi
+  # flexlink "-link -L..." pairs go first, so removing the -L does not leave
+  # an orphaned "-link" behind.
+  sed -i 's#-link[[:space:]][[:space:]]*-L[^ ]*##g' "${config_file}"
+  sed -i 's#-Wl,-L[^ ]*##g' "${config_file}"
+  sed -i 's#-L[^ ]*##g' "${config_file}"
+  if [[ -n "${PREFIX:-}" ]]; then
+    sed -i "s#${keep}#-L${PREFIX}#g" "${config_file}"
+  fi
+
   # Remove prepended binaries path (could be BUILD_PREFIX non-relocatable)
   # Simple commands: CC, AS, ASM, ASPP, STRIP (line ends with binary name)
   sed -Ei 's#^(CC|AS|ASM|ASPP|STRIP)=/.*/([^/]+)$#\1=\2#' "${config_file}"
